@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "B24 OL: recent by activity",
+  "version": "1.8.0",
+  "description": "Пересортировка списка открытых линий по последней активности. Сортируем только после реальных им.recent.*.",
+  "permissions": [],
+  "host_permissions": ["*://*.bitrix24.ru/*"],
+  "content_scripts": [
+    {
+      "matches": ["*://*.bitrix24.ru/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["*://*.bitrix24.ru/*"]
+    }
+  ]
+}
