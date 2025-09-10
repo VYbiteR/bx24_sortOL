@@ -83,7 +83,7 @@
 		});
 	}
 
-	// ==== REST tsMap (один раз) ====
+
 	async function getRecentTsMap() {
 		const map = new Map();
 		const BXNS = window.BX;
@@ -126,7 +126,7 @@
 		return s;
 	};
 
-	// ==== «заморозка» порядка ====
+
 	let rankMap = new Map();
 	let frozenSetSig = '';
 	let tsMapOnce = null;
@@ -135,7 +135,59 @@
 	const currentSetSignature = (ids) => Array.from(new Set(ids)).sort().join('#');
 	const currentOrderSignature = (ids) => ids.join('|');
 
-	// ====== ФИЛЬТРЫ ======
+	const RU_DAYS_SHORT = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+	const RU_MONTHS_GEN = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+
+	function dateKey(ts) {
+		if (!ts || ts <= 0) return 'nodate';
+		const d = new Date(ts);
+		const y = d.getFullYear();
+		const m = String(d.getMonth()+1).padStart(2,'0');
+		const day = String(d.getDate()).padStart(2,'0');
+		return `${y}-${m}-${day}`;
+	}
+	function formatGroupTitleFromTS(ts) {
+		if (!ts || ts <= 0) return 'Без даты';
+		const d = new Date(ts);
+		const now = new Date();
+		const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+		const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+		const diffDays = Math.round((dayStart - d0)/86400000); // отрицательное — в прошлом
+		if (diffDays === 0) return 'сегодня';
+		if (diffDays === -1) return 'вчера';
+		const w = RU_DAYS_SHORT[d.getDay()];
+		return `${w}, ${d.getDate()} ${RU_MONTHS_GEN[d.getMonth()]}`;
+	}
+
+
+	function rebuildDateGroups(tsMap) {
+		const container = findContainer();
+		if (!container) return;
+		// убрать все текущие группы
+		container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
+
+		const items = Array.from(container.querySelectorAll('.bx-messenger-cl-item'))
+			.filter(el => el.style.display !== 'none'); // только видимые после фильтров
+
+		let lastKey = null;
+		for (const el of items) {
+			const id = (el.getAttribute('data-userid') || el.dataset.userid || '').toLowerCase();
+			const ts = tsMap?.get?.(id) ?? -1;
+			const key = dateKey(ts);
+			if (key !== lastKey) {
+				const div = document.createElement('div');
+				div.className = 'bx-messenger-recent-group';
+				const span = document.createElement('span');
+				span.className = 'bx-messenger-recent-group-title';
+				span.textContent = formatGroupTitleFromTS(ts);
+				div.appendChild(span);
+				container.insertBefore(div, el);
+				lastKey = key;
+			}
+		}
+	}
+
+	// ФИЛЬТРЫ
 	const LS_KEY = 'kxrec.filters.v1';
 	const defaultFilters = () => ({
 		unreadOnly: false,
@@ -186,9 +238,10 @@
 			const meta = getItemMeta(el);
 			el.style.display = matchByFilters(meta) ? '' : 'none';
 		}
+		rebuildDateGroups(tsMapOnce || new Map());
 	}
 
-	// безопасная сборка панели (ждём body; не дублируем)
+
 	async function buildFiltersPanel() {
 		if (document.getElementById('kxrec-filters')) return; // уже есть
 		await waitForBody(5000);
@@ -277,7 +330,7 @@
 		});
 	}
 
-	// ==== rebuild + observer ====
+
 	let obs;
 	let rebuildScheduled = false;
 
@@ -285,7 +338,10 @@
 		const container = findContainer();
 		if (!container) { warn('rebuild: контейнер не найден'); return; }
 
-		// плоский список
+
+		const tsMapLocal = opts.tsMap || tsMapOnce || new Map();
+
+
 		container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
 
 		const items = Array.from(container.querySelectorAll('.bx-messenger-cl-item'));
@@ -294,7 +350,7 @@
 		const ids = items.map(el => normId(el.getAttribute('data-userid') || el.dataset.userid));
 		const setSig = currentSetSignature(ids);
 
-		// тот же состав — просто восстановим зафиксированный порядок
+
 		if (rankMap.size && setSig === frozenSetSig) {
 			const orderSigNow = currentOrderSignature(ids);
 			const shouldBe = Array.from(ids).sort((a, b) => (rankMap.get(a) ?? 1e9) - (rankMap.get(b) ?? 1e9));
@@ -308,21 +364,22 @@
 				log('reapply frozen order.', { total: items.length, reason });
 			}
 			applyFilters();
+			rebuildDateGroups(tsMapLocal);
 			return;
 		}
 
-		// первый раз / состав изменился
-		const tsMap = opts.tsMap || tsMapOnce || new Map();
-		const currentIndex = new Map(items.map((el, i) => [el, i]));
 
+
+
+		const currentIndex = new Map(items.map((el, i) => [el, i]));
 		items.sort((a, b) => {
 			const aId = normId(a.getAttribute('data-userid') || a.dataset.userid);
 			const bId = normId(b.getAttribute('data-userid') || b.dataset.userid);
 			const ra = rankMap.has(aId) ? rankMap.get(aId) : 1e9;
 			const rb = rankMap.has(bId) ? rankMap.get(bId) : 1e9;
 			if (ra !== rb) return ra - rb;
-			const ta = tsMap.get(aId) ?? -1;
-			const tb = tsMap.get(bId) ?? -1;
+			const ta = tsMapLocal.get(aId) ?? -1;
+			const tb = tsMapLocal.get(bId) ?? -1;
 			if (ta !== tb) return tb - ta;
 			return (currentIndex.get(a) ?? 0) - (currentIndex.get(b) ?? 0);
 		});
@@ -339,8 +396,9 @@
 		rankMap = new Map(newIds.map((id, i) => [id, i]));
 		frozenSetSig = currentSetSignature(newIds);
 
-		log('rebuild ok.', { total: items.length, source: tsMap.size ? 'rest' : 'dom', reason });
+		log('rebuild ok.', { total: items.length, source: tsMapLocal.size ? 'rest' : 'dom', reason });
 		applyFilters();
+		rebuildDateGroups(tsMapLocal);
 	}
 
 	function armObserver() {
@@ -379,11 +437,11 @@
 		armDomRetroGate();
 		await gatePromise;
 
-		// ждём, пока реально появится контейнер списков (и body, если нужно)
+
 		await waitForBody(5000).catch(() => {});
 		await waitForContainer(5000).catch(() => {});
 
-		// только теперь создаём панель фильтров (иначе body может быть ещё null)
+		//  панель фильтров
 		try { await buildFiltersPanel(); } catch (e) { warn('filters panel build skipped:', e?.message || e); }
 
 		tsMapOnce = await getRecentTsMap().catch(() => new Map());
