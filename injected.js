@@ -242,7 +242,7 @@
 	if (has(/--user\b/)) itemType = 'dialog';
 	if (has(/--chat\b/)) itemType = 'chat';
 	if (has(/--crm\b/)) itemType = 'deal';
-	if (has(/--videoconf\b/)) itemType = 'videoconф';
+	if (has(/--videoconf\b/)) itemType = 'videoconf';
 	if (has(/--support24|--support24Question/)) itemType = 'support';
 	if (has(/--sonetGroup\b/)) itemType = 'group';
 	if (has(/--general\b/)) itemType = 'general';
