@@ -1,6 +1,6 @@
 (function () {
 	try {
-		console.log('[KX-REC/CS] content.js init', {
+		console.log('[ANIT-CHATSORT/CS] content.js init', {
 			href: location.href,
 			inFrame: self !== top
 		});
@@ -10,6 +10,6 @@
 		(document.documentElement || document.head || document.body).appendChild(s);
 		s.onload = s.onerror = () => setTimeout(() => s.remove(), 0);
 	} catch (e) {
-		console.warn('[KX-REC/CS] inject failed', e);
+		console.warn('[ANIT-CHATSORT/CS] inject failed', e);
 	}
 })();
