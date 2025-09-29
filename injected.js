@@ -228,12 +228,31 @@
 
 	function getItemMetaInternal(el) {
 	const id = normId(el.getAttribute('data-id') || el.dataset.id || el.querySelector('[data-id]')?.getAttribute('data-id'));
-	const title = (el.querySelector('.bx-im-chat-title__text')?.getAttribute('title') ||
-	el.querySelector('.bx-im-chat-title__text')?.textContent || '').trim().toLowerCase();
-	const hasUnread =
-	!!el.querySelector('.bx-im-list-recent-item__counter, .bx-im-list-recent-item__unread-counter, .bx-im-list-recent-item__counters .--unread');
-	const lastText = (el.querySelector('.bx-im-list-recent-item__message_text')?.textContent || '').trim().toLowerCase();
+		const title = (
+			el.querySelector('.bx-im-chat-title__text')?.getAttribute('title') ||
+			el.querySelector('.bx-im-chat-title__text')?.textContent || ''
+		).trim().toLowerCase();
+		const lastText = (
+			el.querySelector('.bx-im-list-recent-item__message_text')?.textContent || ''
+		).trim().toLowerCase();
 
+
+		const getUnread = () => {
+
+			const numEl = el.querySelector('.bx-im-list-recent-item__counter_number');
+			if (numEl) {
+				const n = parseInt((numEl.textContent || '').replace(/\D+/g, ''), 10);
+				return Number.isFinite(n) && n > 0;
+			}
+
+			const cntWrap = el.querySelector('.bx-im-list-recent-item__counters');
+			if (cntWrap) {
+				const n = parseInt((cntWrap.textContent || '').replace(/\D+/g, ''), 10);
+				return Number.isFinite(n) && n > 0;
+			}
+			return false;
+		};
+		const hasUnread = getUnread();
 	const avatar = el.querySelector('.bx-im-avatar__container') || el;
 	const cl = (avatar?.className || '') + ' ' + (el.querySelector('.bx-im-chat-title__icon')?.className || '');
 	const has = (rx) => rx.test(cl) || rx.test(title) || rx.test(lastText);
