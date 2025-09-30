@@ -526,7 +526,7 @@
 	['calendar','Календарь'],
 	['general','Общий чат'],
 	['network','Внешние чаты'],
-	['guests', 'Гости']
+	['guests', 'Гости'],
 	['tasks','Задачи'],
 	['other','Остальные'],
 	].map(([v,t]) => `<label class="chip"><input type="checkbox" value="${v}"> ${t}</label>`).join('')}
