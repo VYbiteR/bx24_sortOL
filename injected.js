@@ -491,7 +491,7 @@
 </style>
 <div class="pane">
   <h4 style="position:relative;padding-right:28px;">
-    Фильтры (ANIT - CHAT SORTER · ${IS_OL_FRAME ? 'Контакт-центр' : 'Чаты'})
+    ANIT - CHAT SORTER · ${IS_OL_FRAME ? 'Контакт-центр' : 'Чаты'}
     <button id="anit_toggle_btn" class="anit-toggle" title="Скрыть/показать (Ctrl+Alt+F)"
       style="position:absolute;right:0;top:-2px;width:22px;height:22px;border:1px solid rgba(255,255,255,.25);
              border-radius:6px;background:#0f1115;color:#fff;cursor:pointer;line-height:20px;text-align:center;">
