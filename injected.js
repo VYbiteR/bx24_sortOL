@@ -413,12 +413,29 @@
 });
 
 
-	document.addEventListener('keydown', (e) => {
-	if (e.ctrlKey && e.altKey && e.code === 'KeyF') {
-	const pane = document.getElementById('kxrec-filters');
-	if (pane) pane.style.display = (pane.style.display === 'none' ? '' : 'none');
-}
-});
+		function hotkeyHandler(e){
+
+			if (!e.ctrlKey || !e.altKey) return;
+			if (e.code !== 'KeyF') return;
+
+			const pane = document.getElementById('kxrec-filters');
+			if (!pane) return;
+
+
+			const nowHidden = pane.classList.contains('kxrec-hidden');
+			if (nowHidden) pane.classList.remove('kxrec-hidden');
+			else pane.classList.add('kxrec-hidden');
+
+			try { localStorage.setItem('kxrec.filters.hidden', pane.classList.contains('kxrec-hidden') ? '1' : '0'); } catch {}
+
+
+			e.stopImmediatePropagation();
+			e.preventDefault();
+		}
+
+
+		document.addEventListener('keydown', hotkeyHandler, true);
+		window.addEventListener('keydown', hotkeyHandler, true);
 
 
 	keepInsideViewport();
@@ -448,6 +465,7 @@
 	host.innerHTML = `
 <style>
 #kxrec-filters{position:fixed;top:8px;left:8px;z-index:9999; max-width: 300px;}
+#kxrec-filters.kxrec-hidden{ display:none !important; }
 #kxrec-filters .pane{background:#1f232b;color:#fff;border:1px solid rgba(255,255,255,.15);
   border-radius:10px;padding:10px 12px;font:12px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial;
   box-shadow:0 8px 24px rgba(0,0,0,.35)}
@@ -465,7 +483,14 @@
 #kxrec-filters .chip input{accent-color:#5dc}
 </style>
 <div class="pane">
-  <h4>Фильтры (KX-REC · ${IS_OL_FRAME ? 'Контакт-центр' : 'Чаты'})</h4>
+  <h4 style="position:relative;padding-right:28px;">
+    Фильтры (KX-REC · ${IS_OL_FRAME ? 'Контакт-центр' : 'Чаты'})
+    <button id="kx_toggle_btn" class="kx-toggle" title="Скрыть/показать (Ctrl+Alt+F)"
+      style="position:absolute;right:0;top:-2px;width:22px;height:22px;border:1px solid rgba(255,255,255,.25);
+             border-radius:6px;background:#0f1115;color:#fff;cursor:pointer;line-height:20px;text-align:center;">
+      -
+    </button>
+  </h4>
   <div class="row">
     <label><input type="checkbox" id="kx_unread"> Непрочитанные</label>
     <label><input type="checkbox" id="kx_attach"> С вложениями</label>
@@ -510,7 +535,26 @@
 </div>`;
 	document.body.appendChild(host);
 	filtersHost = host;
+		const HIDE_LS_KEY = 'kxrec.filters.hidden';
+		function setHidden(hidden) {
+			if (hidden) host.classList.add('kxrec-hidden');
+			else host.classList.remove('kxrec-hidden');
+			try { localStorage.setItem(HIDE_LS_KEY, hidden ? '1' : '0'); } catch {}
+		}
+		function togglePanel() {
+			const nowHidden = host.classList.contains('kxrec-hidden');
+			setHidden(!nowHidden);
+		}
 
+
+		try { setHidden(localStorage.getItem(HIDE_LS_KEY) === '1'); } catch {}
+
+
+		host.querySelector('#kx_toggle_btn')?.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			togglePanel();
+		});
 	const mode = IS_OL_FRAME ? 'ol' : 'internal';
 
 
