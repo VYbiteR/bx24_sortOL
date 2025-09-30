@@ -1,9 +1,9 @@
 (function () {
 	try {
-		console.log('[ANIT-CHATSORT/CS] content.js init', {
+		/*console.log('[ANIT-CHATSORT/CS] content.js init', {
 			href: location.href,
 			inFrame: self !== top
-		});
+		});*/
 		const s = document.createElement('script');
 		s.src = chrome.runtime.getURL('injected.js');
 		s.async = false;

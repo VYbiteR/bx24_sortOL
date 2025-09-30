@@ -2,13 +2,19 @@
 
 	(function () {
 
-	if (window.__KXREC_RUNNING__) { return; }
-	window.__KXREC_RUNNING__ = '1.14.3';
+	if (window.__ANITREC_RUNNING__) { return; }
+	window.__ANITREC_RUNNING__ = '1.14.4';
 
-	const VER = '1.14.3';
-	const log  = (...a) => console.log('[ANIT-CHATSORT]', ...a);
-	const warn = (...a) => console.log('[ANIT-CHATSORT]', ...a);
-	const err  = (...a) => console.error('[ANIT-CHATSORT]', ...a);
+	const VER = '1.14.4';
+	const TAG = 'ANIT: CHAT SORTER';
+	const LBL = `%c[${TAG}]`;
+	const CSS_LOG  = 'background:#000;color:#fff;padding:1px 4px;border-radius:3px';
+	const CSS_WARN = 'background:#8B5E00;color:#fff;padding:1px 4px;border-radius:3px';
+	const CSS_ERR  = 'background:#7F1D1D;color:#fff;padding:1px 4px;border-radius:3px';
+
+	const log  = (...a) => console.log(LBL, CSS_LOG, ...a);
+	const warn = (...a) => console.log(LBL, CSS_WARN, ...a);
+	const err  = (...a) => console.error(LBL, CSS_ERR, ...a);
 
 	const IS_FRAME = self !== top;
 	const qs = new URLSearchParams(location.search || '');
@@ -64,8 +70,8 @@
 	if (!XO) return;
 	const _open = XO.prototype.open;
 	const _send = XO.prototype.send;
-	XO.prototype.open = function (m, url, ...rest) { this.__kx_url = url; return _open.call(this, m, url, ...rest); };
-	XO.prototype.send = function (body) { try { maybeOpenGate('xhr', this.__kx_url || ''); } catch {} return _send.call(this, body); };
+	XO.prototype.open = function (m, url, ...rest) { this.__anit_url = url; return _open.call(this, m, url, ...rest); };
+	XO.prototype.send = function (body) { try { maybeOpenGate('xhr', this.__anit_url || ''); } catch {} return _send.call(this, body); };
 })();
 
 	function armDomRetroGate() {
@@ -195,7 +201,7 @@
 }
 
 
-	const LS_KEY = 'kxrec.filters.v2';
+	const LS_KEY = 'anit.filters.v2';
 	const defaultFilters = () => ({
 	unreadOnly: false,
 	withAttach: false,
@@ -263,12 +269,12 @@
 	if (has(/--crm\b/)) itemType = 'deal';
 	if (has(/--videoconf\b/)) itemType = 'videoconf';
 	if (has(/--support24|--support24Question/)) itemType = 'support';
-	if (has(/--sonetGroup\b/)) itemType = 'group';
+	if (has(/--sonetGroup\b/) || !!el.querySelector('.ui-avatar.--hexagon')) itemType = 'group';
 	if (has(/--general\b/)) itemType = 'general';
-	if (has(/--network\b/)) itemType = 'news';
-
-	if (has(/--phone\b/) || /звонок\b|пропущенн|телефон/i.test(title) || /звонок\b|телефон/i.test(lastText)) itemType = 'phone';
-	if (has(/--calendar\b/) || /чат создан из события/i.test(lastText) || /календар/i.test(title)) itemType = 'calendar';
+	if (has(/--network\b/)) itemType = 'network';
+	if (has(/--tasks\b/)) itemType = 'tasks';
+	if (has(/--call\b/)) itemType = 'phone';
+	if (has(/--calendar\b/)) itemType = 'calendar';
 
 	const hasAttach = /\[(вложение|файл)\]/i.test(lastText);
 
@@ -317,7 +323,7 @@
 }
 
 
-	const POS_LS_KEY = (mode) => `kxrec.filters.pos.${mode}`; // 'ol' | 'internal'
+	const POS_LS_KEY = (mode) => `anit.filters.pos.${mode}`; // 'ol' | 'internal'
 
 	function restorePosition(host, mode) {
 	try {
@@ -418,15 +424,15 @@
 			if (!e.ctrlKey || !e.altKey) return;
 			if (e.code !== 'KeyF') return;
 
-			const pane = document.getElementById('kxrec-filters');
+			const pane = document.getElementById('anit-filters');
 			if (!pane) return;
 
 
-			const nowHidden = pane.classList.contains('kxrec-hidden');
-			if (nowHidden) pane.classList.remove('kxrec-hidden');
-			else pane.classList.add('kxrec-hidden');
+			const nowHidden = pane.classList.contains('anit-hidden');
+			if (nowHidden) pane.classList.remove('anit-hidden');
+			else pane.classList.add('anit-hidden');
 
-			try { localStorage.setItem('kxrec.filters.hidden', pane.classList.contains('kxrec-hidden') ? '1' : '0'); } catch {}
+			try { localStorage.setItem('anit.filters.hidden', pane.classList.contains('anit-hidden') ? '1' : '0'); } catch {}
 
 
 			e.stopImmediatePropagation();
@@ -446,7 +452,7 @@
 	let filtersHost = null;
 
 	function nukeDuplicatePanels() {
-	document.querySelectorAll('#kxrec-filters').forEach((n, i) => { if (i === 0) return; n.remove(); });
+	document.querySelectorAll('#anit-filters').forEach((n, i) => { if (i === 0) return; n.remove(); });
 }
 
 	async function buildFiltersPanel() {
@@ -456,49 +462,49 @@
 	await waitForBody(5000);
 
 
-	if (document.getElementById('kxrec-filters')) { nukeDuplicatePanels(); return; }
+	if (document.getElementById('anit-filters')) { nukeDuplicatePanels(); return; }
 
 	nukeDuplicatePanels();
 
 	const host = document.createElement('div');
-	host.id = 'kxrec-filters';
+	host.id = 'anit-filters';
 	host.innerHTML = `
 <style>
-#kxrec-filters{position:fixed;top:8px;left:8px;z-index:9999; max-width: 300px;}
-#kxrec-filters.kxrec-hidden{ display:none !important; }
-#kxrec-filters .pane{background:#1f232b;color:#fff;border:1px solid rgba(255,255,255,.15);
+#anit-filters{position:fixed;top:8px;left:8px;z-index:9999; max-width: 300px;}
+#anit-filters.anit-hidden{ display:none !important; }
+#anit-filters .pane{background:#1f232b;color:#fff;border:1px solid rgba(255,255,255,.15);
   border-radius:10px;padding:10px 12px;font:12px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial;
   box-shadow:0 8px 24px rgba(0,0,0,.35)}
-#kxrec-filters h4{margin:0 0 8px 0;font-size:12px;font-weight:600;letter-spacing:.2px;cursor:move;}
-#kxrec-filters .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:6px 0}
-#kxrec-filters label{display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer}
-#kxrec-filters input[type="text"]{width:220px;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff;outline:none}
-#kxrec-filters select{padding:3px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff}
-#kxrec-filters .muted{opacity:.75}
-#kxrec-filters .actions{display:flex;gap:8px;margin-top:6px}
-#kxrec-filters button{padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff;cursor:pointer}
-#kxrec-filters .kbd{padding:1px 4px;border:1px solid rgba(255,255,255,.3);border-radius:4px;font-family:monospace;font-size:11px}
-#kxrec-filters .chips{display:flex;flex-wrap:wrap;gap:6px}
-#kxrec-filters .chip{display:inline-flex;gap:6px;align-items:center;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:3px 8px;background:#0f1115}
-#kxrec-filters .chip input{accent-color:#5dc}
+#anit-filters h4{margin:0 0 8px 0;font-size:12px;font-weight:600;letter-spacing:.2px;cursor:move;}
+#anit-filters .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:6px 0}
+#anit-filters label{display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer}
+#anit-filters input[type="text"]{width:220px;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff;outline:none}
+#anit-filters select{padding:3px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff}
+#anit-filters .muted{opacity:.75}
+#anit-filters .actions{display:flex;gap:8px;margin-top:6px}
+#anit-filters button{padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff;cursor:pointer}
+#anit-filters .kbd{padding:1px 4px;border:1px solid rgba(255,255,255,.3);border-radius:4px;font-family:monospace;font-size:11px}
+#anit-filters .chips{display:flex;flex-wrap:wrap;gap:6px}
+#anit-filters .chip{display:inline-flex;gap:6px;align-items:center;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:3px 8px;background:#0f1115}
+#anit-filters .chip input{accent-color:#5dc}
 </style>
 <div class="pane">
   <h4 style="position:relative;padding-right:28px;">
-    Фильтры (KX-REC · ${IS_OL_FRAME ? 'Контакт-центр' : 'Чаты'})
-    <button id="kx_toggle_btn" class="kx-toggle" title="Скрыть/показать (Ctrl+Alt+F)"
+    Фильтры (ANIT - CHAT SORTER · ${IS_OL_FRAME ? 'Контакт-центр' : 'Чаты'})
+    <button id="anit_toggle_btn" class="anit-toggle" title="Скрыть/показать (Ctrl+Alt+F)"
       style="position:absolute;right:0;top:-2px;width:22px;height:22px;border:1px solid rgba(255,255,255,.25);
              border-radius:6px;background:#0f1115;color:#fff;cursor:pointer;line-height:20px;text-align:center;">
       -
     </button>
   </h4>
   <div class="row">
-    <label><input type="checkbox" id="kx_unread"> Непрочитанные</label>
-    <label><input type="checkbox" id="kx_attach"> С вложениями</label>
+    <label><input type="checkbox" id="anit_unread"> Непрочитанные</label>
+    <label><input type="checkbox" id="anit_attach"> С вложениями</label>
     ${IS_OL_FRAME ? `
-      <label><input type="checkbox" id="kx_wa"> WhatsApp</label>
-      <label><input type="checkbox" id="kx_tg"> Telegram</label>
+      <label><input type="checkbox" id="anit_wa"> WhatsApp</label>
+      <label><input type="checkbox" id="anit_tg"> Telegram</label>
       <label class="muted">Статус:
-        <select id="kx_status">
+        <select id="anit_status">
           <option value="any">Любой</option>
           <option value="20">20</option>
           <option value="25">25</option>
@@ -506,8 +512,8 @@
         </select>
       </label>
     ` : `
-      <div class="muted">Типы:</div>
-      <div class="chips" id="kx_types">
+      <div class="muted"></div>
+      <div class="chips" id="anit_types">
         ${[
 	['dialog','Диалоги'],
 	['chat','Чаты'],
@@ -518,31 +524,32 @@
 	['phone','Телефон'],
 	['calendar','Календарь'],
 	['general','Общий чат'],
-	['news','Новости'],
+	['network','Внешние чаты'], 
+		['tasks','Задачи'],
 	['other','Остальные'],
 	].map(([v,t]) => `<label class="chip"><input type="checkbox" value="${v}"> ${t}</label>`).join('')}
       </div>
     `}
   </div>
   <div class="row">
-    <input type="text" id="kx_query" placeholder="Поиск по имени/последнему сообщению">
+    <input type="text" id="anit_query" placeholder="Поиск по имени/последнему сообщению">
   </div>
   <div class="actions">
-    <button id="kx_apply">Применить</button>
-    <button id="kx_reset">Сброс</button>
+    <button id="anit_apply">Применить</button>
+    <button id="anit_reset">Сброс</button>
     <span class="muted">(<span class="kbd">Ctrl</span>+<span class="kbd">Alt</span>+<span class="kbd">F</span> — показать/скрыть)</span>
   </div>
 </div>`;
 	document.body.appendChild(host);
 	filtersHost = host;
-		const HIDE_LS_KEY = 'kxrec.filters.hidden';
+		const HIDE_LS_KEY = 'anit.filters.hidden';
 		function setHidden(hidden) {
-			if (hidden) host.classList.add('kxrec-hidden');
-			else host.classList.remove('kxrec-hidden');
+			if (hidden) host.classList.add('anit-hidden');
+			else host.classList.remove('anit-hidden');
 			try { localStorage.setItem(HIDE_LS_KEY, hidden ? '1' : '0'); } catch {}
 		}
 		function togglePanel() {
-			const nowHidden = host.classList.contains('kxrec-hidden');
+			const nowHidden = host.classList.contains('anit-hidden');
 			setHidden(!nowHidden);
 		}
 
@@ -550,7 +557,7 @@
 		try { setHidden(localStorage.getItem(HIDE_LS_KEY) === '1'); } catch {}
 
 
-		host.querySelector('#kx_toggle_btn')?.addEventListener('click', (e) => {
+		host.querySelector('#anit_toggle_btn')?.addEventListener('click', (e) => {
 			e.preventDefault();
 			e.stopPropagation();
 			togglePanel();
@@ -575,68 +582,68 @@
 	host.style.top   = `${Math.max(0, top)}px`;
 }
 
-	// Инициализация значений и обработчиков
-	host.querySelector('#kx_unread').checked = !!filters.unreadOnly;
-	host.querySelector('#kx_attach').checked = !!filters.withAttach;
-	host.querySelector('#kx_query').value = String(filters.query || '');
+
+	host.querySelector('#anit_unread').checked = !!filters.unreadOnly;
+	host.querySelector('#anit_attach').checked = !!filters.withAttach;
+	host.querySelector('#anit_query').value = String(filters.query || '');
 
 	if (IS_OL_FRAME) {
-	const wa = host.querySelector('#kx_wa'), tg = host.querySelector('#kx_tg'), st = host.querySelector('#kx_status');
+	const wa = host.querySelector('#anit_wa'), tg = host.querySelector('#anit_tg'), st = host.querySelector('#anit_status');
 	if (wa) wa.checked = !!filters.onlyWhatsApp;
 	if (tg) tg.checked = !!filters.onlyTelegram;
 	if (st) st.value = String(filters.status || 'any');
 } else {
 	const sel = new Set(Array.isArray(filters.typesSelected) ? filters.typesSelected : []);
-	host.querySelectorAll('#kx_types input[type=checkbox]').forEach(cb => { cb.checked = sel.has(cb.value); });
+	host.querySelectorAll('#anit_types input[type=checkbox]').forEach(cb => { cb.checked = sel.has(cb.value); });
 }
 
 	function readAndApply() {
-	filters.unreadOnly = host.querySelector('#kx_unread').checked;
-	filters.withAttach = host.querySelector('#kx_attach').checked;
-	filters.query      = host.querySelector('#kx_query').value;
+	filters.unreadOnly = host.querySelector('#anit_unread').checked;
+	filters.withAttach = host.querySelector('#anit_attach').checked;
+	filters.query      = host.querySelector('#anit_query').value;
 
 	if (IS_OL_FRAME) {
-	filters.onlyWhatsApp = host.querySelector('#kx_wa')?.checked || false;
-	filters.onlyTelegram = host.querySelector('#kx_tg')?.checked || false;
-	filters.status       = host.querySelector('#kx_status')?.value || 'any';
+	filters.onlyWhatsApp = host.querySelector('#anit_wa')?.checked || false;
+	filters.onlyTelegram = host.querySelector('#anit_tg')?.checked || false;
+	filters.status       = host.querySelector('#anit_status')?.value || 'any';
 } else {
 	const chosen = [];
-	host.querySelectorAll('#kx_types input[type=checkbox]:checked').forEach(cb => chosen.push(cb.value));
+	host.querySelectorAll('#anit_types input[type=checkbox]:checked').forEach(cb => chosen.push(cb.value));
 	filters.typesSelected = chosen;
 }
 	saveFilters();
 	applyFilters();
 }
 
-	host.querySelector('#kx_apply').addEventListener('click', readAndApply);
-	host.querySelector('#kx_reset').addEventListener('click', () => {
+	host.querySelector('#anit_apply').addEventListener('click', readAndApply);
+	host.querySelector('#anit_reset').addEventListener('click', () => {
 	const wasOL = IS_OL_FRAME;
 	filters = defaultFilters();
 	saveFilters();
-	host.querySelector('#kx_unread').checked = false;
-	host.querySelector('#kx_attach').checked = false;
-	host.querySelector('#kx_query').value = '';
+	host.querySelector('#anit_unread').checked = false;
+	host.querySelector('#anit_attach').checked = false;
+	host.querySelector('#anit_query').value = '';
 	if (wasOL) {
-	const st = host.querySelector('#kx_status');
+	const st = host.querySelector('#anit_status');
 	if (st) st.value = 'any';
-	const wa = host.querySelector('#kx_wa'), tg = host.querySelector('#kx_tg');
+	const wa = host.querySelector('#anit_wa'), tg = host.querySelector('#anit_tg');
 	if (wa) wa.checked = false; if (tg) tg.checked = false;
 } else {
-	host.querySelectorAll('#kx_types input[type=checkbox]').forEach(cb => cb.checked = false);
+	host.querySelectorAll('#anit_types input[type=checkbox]').forEach(cb => cb.checked = false);
 }
 	applyFilters();
 });
 
 	host.querySelectorAll('input,select').forEach(el => {
 	el.addEventListener('change', readAndApply);
-	if (el.id === 'kx_query') el.addEventListener('keydown', (e) => { if (e.key === 'Enter') readAndApply(); });
+	if (el.id === 'anit_query') el.addEventListener('keydown', (e) => { if (e.key === 'Enter') readAndApply(); });
 });
 
-	// Перетаскивание по всему окну
+
 	makeDraggable(host, mode);
 }
 
-	// ----------- OL: перестройка/наблюдатель (внутренние — только фильтр) -----------
+
 	let obs;
 	let rebuildScheduled = false;
 
@@ -716,7 +723,7 @@
 	// Если ушли со «внутренних чатов» — убираем плашку
 	const stillInternal = isInternalChatsDOM();
 	if (!IS_OL_FRAME && !stillInternal) {
-	document.getElementById('kxrec-filters')?.remove();
+	document.getElementById('anit-filters')?.remove();
 	filtersHost = null;
 	return;
 }
@@ -743,25 +750,25 @@
 	log('observeContainer: подписан на DOM изменения');
 }
 
-	// Следим за маршрутами SPA только для внутренних чатов (в OL не нужно)
+
 	let routeObs = null;
 	function armRouteObserverIfNeeded() {
 	if (IS_OL_FRAME) return;
 	if (routeObs) return;
 	routeObs = new MutationObserver(() => {
 	const onChats = isInternalChatsDOM();
-	const havePanel = !!document.getElementById('kxrec-filters');
+	const havePanel = !!document.getElementById('anit-filters');
 	if (onChats && !havePanel) {
 	buildFiltersPanel().then(applyFilters);
 } else if (!onChats && havePanel) {
-	document.getElementById('kxrec-filters')?.remove();
+	document.getElementById('anit-filters')?.remove();
 	filtersHost = null;
 }
 });
 	routeObs.observe(document.documentElement, { childList: true, subtree: true });
 }
 
-	// ----------- boot -----------
+
 	async function boot() {
 	log('start', { ver: VER, href: location.href, inFrame: IS_FRAME, isOL: IS_OL_FRAME, internal: !IS_OL_FRAME && isInternalChatsDOM() });
 
