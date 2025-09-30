@@ -275,6 +275,7 @@
 	if (has(/--tasks\b/)) itemType = 'tasks';
 	if (has(/--call\b/)) itemType = 'phone';
 	if (has(/--calendar\b/)) itemType = 'calendar';
+	if (has(/--extranet|--guest/)) itemType = 'guests';
 
 	const hasAttach = /\[(вложение|файл)\]/i.test(lastText);
 
@@ -506,9 +507,9 @@
       <label class="muted">Статус:
         <select id="anit_status">
           <option value="any">Любой</option>
-          <option value="20">20</option>
+          <option value="20">В работе</option>
           <option value="25">25</option>
-          <option value="40">40</option>
+          <option value="40">Отвеченные</option>
         </select>
       </label>
     ` : `
@@ -524,8 +525,9 @@
 	['phone','Телефон'],
 	['calendar','Календарь'],
 	['general','Общий чат'],
-	['network','Внешние чаты'], 
-		['tasks','Задачи'],
+	['network','Внешние чаты'],
+	['guests', 'Гости']
+	['tasks','Задачи'],
 	['other','Остальные'],
 	].map(([v,t]) => `<label class="chip"><input type="checkbox" value="${v}"> ${t}</label>`).join('')}
       </div>
