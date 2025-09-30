@@ -132,14 +132,14 @@
 	if (typeof dateStr === 'string') dateStr = dateStr.replace(' ', 'T');
 	const ts = Date.parse(dateStr) || 0;
 	if (dialogId) map.set(dialogId, ts);
-}
-	log('REST tsMap size', map.size);
-	return map;
-} catch (e) {
-	warn('REST error, без tsMap', e);
-	return map;
-}
-}
+	}
+		log('REST tsMap size', map.size);
+		return map;
+	} catch (e) {
+		warn('REST error, без tsMap', e);
+		return map;
+	}
+	}
 
 	const normId = (raw) => {
 	if (!raw) return '';
@@ -261,7 +261,7 @@
 		const hasUnread = getUnread();
 	const avatar = el.querySelector('.bx-im-avatar__container') || el;
 	const cl = (avatar?.className || '') + ' ' + (el.querySelector('.bx-im-chat-title__icon')?.className || '');
-	const has = (rx) => rx.test(cl) || rx.test(title) || rx.test(lastText);
+	const has = (rx) => rx.test(cl) || rx.test(title) /*|| rx.test(lastText)*/;
 
 	let itemType = 'other';
 	if (has(/--user\b/)) itemType = 'dialog';
