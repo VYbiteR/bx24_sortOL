@@ -3,9 +3,9 @@
 	(function () {
 
 	if (window.__ANITREC_RUNNING__) { return; }
-	window.__ANITREC_RUNNING__ = '1.14.4';
+	window.__ANITREC_RUNNING__ = '1.14.5';
 
-	const VER = '1.14.4';
+	const VER = '1.14.5';
 	const TAG = 'ANIT: CHAT SORTER';
 	const LBL = `%c[${TAG}]`;
 	const CSS_LOG  = 'background:#000;color:#fff;padding:1px 4px;border-radius:3px';
@@ -22,6 +22,7 @@
 	IS_FRAME &&
 	/\/desktop_app\/\?/i.test(location.href) &&
 	(qs.get('IM_LINES') === 'Y' || /IM_LINES=Y/i.test(location.href));
+
 
 
 	function isInternalChatsDOM() {
@@ -88,7 +89,42 @@
 });
 }
 
+		async function waitForEl(locator, {timeout=8000, interval=100} = {}) {
+			const isFn = typeof locator === 'function';
+			const t0 = performance.now();
+			while (performance.now() - t0 < timeout) {
+				const el = isFn ? locator() : document.querySelector(locator);
+				if (el) return el;
+				await new Promise(r => setTimeout(r, interval));
+			}
+			return null;
+		}
 
+
+		function findInternalScrollContainer() {
+			const list = document.querySelector('.bx-im-list-container-recent__elements');
+			if (!list) return null;
+
+
+			let n = list;
+			for (let i = 0; i < 6 && n; i++) {
+				if (n.classList && n.classList.contains('bx-im-list-recent__scroll-container')) return n;
+				n = n.parentElement;
+			}
+
+
+			const direct = document.querySelector('.bx-im-list-recent__scroll-container');
+			if (direct) return direct;
+
+
+			n = list.parentElement;
+			while (n) {
+				const st = getComputedStyle(n);
+				if (/(auto|scroll)/i.test(st.overflowY)) return n;
+				n = n.parentElement;
+			}
+			return null;
+		}
 	function waitForBody(timeout = 5000) {
 	return new Promise((resolve, reject) => {
 	if (document.body) return resolve(document.body);
@@ -99,7 +135,58 @@
 	setTimeout(() => { cleanup(); document.body ? resolve(document.body) : reject(new Error('body-timeout')); }, timeout);
 });
 }
-	function waitForContainer(timeout = 5000) {
+
+
+		function autoScrollWithObserver(
+			{ scrollEl = null, observeEl = null, tick = 250, idleLimit = 1500, maxTime = 60000 } = {}
+		) {
+			return new Promise(async (resolve) => {
+
+				if (!scrollEl) {
+					scrollEl = await waitForEl(findInternalScrollContainer, {timeout: 10000, interval: 100});
+				}
+				if (!observeEl) {
+					observeEl = await waitForEl('.bx-im-list-container-recent__elements', {timeout: 10000, interval: 100});
+				}
+				if (!scrollEl) { console.warn('[ANIT-CHATSORTER] autoScroll: не найден scroll container'); return resolve(); }
+				if (!observeEl) observeEl = scrollEl;
+
+				let changed = false, idle = 0, t0 = performance.now();
+
+				const scrollDown = () => {
+
+					scrollEl.scrollTop = scrollEl.scrollHeight;
+				};
+
+				const obs = new MutationObserver(() => { changed = true; });
+				obs.observe(observeEl, { childList: true, subtree: true });
+
+				const id = setInterval(() => {
+					const before = scrollEl.scrollTop;
+					scrollDown();
+
+					if (changed) { changed = false; idle = 0; }
+					else {
+						const atBottom =
+							Math.abs((scrollEl.scrollTop + scrollEl.clientHeight) - scrollEl.scrollHeight) < 2 ||
+							scrollEl.scrollTop === before;
+						if (atBottom) idle += tick;
+					}
+
+					const timedOut = (performance.now() - t0) > maxTime;
+					if (idle >= idleLimit || timedOut) {
+						clearInterval(id);
+						obs.disconnect();
+						console.log('[ANIT-CHATSORTER] Автоскролл остановлен. idle =', idle, 'ms, timedOut =', timedOut);
+						resolve();
+					}
+				}, tick);
+			});
+		}
+
+
+
+		function waitForContainer(timeout = 5000) {
 	return new Promise((resolve, reject) => {
 	const ok = () => { const c = findContainer(); if (c) { clearInterval(t); resolve(c); } };
 	const t = setInterval(ok, 80);
@@ -337,8 +424,39 @@
 	return true;
 } catch { return false; }
 }
+		function uiFromFilters(host){
+			host.querySelector('#anit_unread').checked = !!filters.unreadOnly;
+			host.querySelector('#anit_attach').checked = !!filters.withAttach;
+			host.querySelector('#anit_query').value = String(filters.query || '');
+			if (IS_OL_FRAME) {
+				const wa = host.querySelector('#anit_wa'),
+					tg = host.querySelector('#anit_tg'),
+					st = host.querySelector('#anit_status');
+				if (wa) wa.checked = !!filters.onlyWhatsApp;
+				if (tg) tg.checked = !!filters.onlyTelegram;
+				if (st) st.value   = String(filters.status || 'any');
+			} else {
+				const sel = new Set(Array.isArray(filters.typesSelected) ? filters.typesSelected : []);
+				host.querySelectorAll('#anit_types input[type=checkbox]').forEach(cb => { cb.checked = sel.has(cb.value); });
+			}
+		}
 
-	function clamp(val, min, max) { return Math.min(Math.max(val, min), max); }
+		function filtersFromUI(host){
+			filters.unreadOnly = host.querySelector('#anit_unread').checked;
+			filters.withAttach = host.querySelector('#anit_attach').checked;
+			filters.query      = host.querySelector('#anit_query').value;
+			if (IS_OL_FRAME) {
+				filters.onlyWhatsApp = host.querySelector('#anit_wa')?.checked || false;
+				filters.onlyTelegram = host.querySelector('#anit_tg')?.checked || false;
+				filters.status       = host.querySelector('#anit_status')?.value || 'any';
+			} else {
+				const chosen = [];
+				host.querySelectorAll('#anit_types input[type=checkbox]:checked').forEach(cb => chosen.push(cb.value));
+				filters.typesSelected = chosen;
+			}
+		}
+
+		function clamp(val, min, max) { return Math.min(Math.max(val, min), max); }
 
 	function makeDraggable(host, mode) {
 	const handle = host.querySelector('h4') || host;
@@ -471,7 +589,7 @@
 	host.id = 'anit-filters';
 	host.innerHTML = `
 <style>
-#anit-filters{position:fixed;top:8px;left:8px;z-index:9999; max-width: 300px;}
+#anit-filters{position:fixed;top:8px;left:8px;z-index:9999; max-width: 400px;}
 #anit-filters.anit-hidden{ display:none !important; }
 #anit-filters .pane{background:#1f232b;color:#fff;border:1px solid rgba(255,255,255,.15);
   border-radius:10px;padding:10px 12px;font:12px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial;
@@ -479,7 +597,7 @@
 #anit-filters h4{margin:0 0 8px 0;font-size:12px;font-weight:600;letter-spacing:.2px;cursor:move;}
 #anit-filters .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:6px 0}
 #anit-filters label{display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer}
-#anit-filters input[type="text"]{width:220px;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff;outline:none}
+#anit-filters input[type="text"]{width:300px;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff;outline:none}
 #anit-filters select{padding:3px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff}
 #anit-filters .muted{opacity:.75}
 #anit-filters .actions{display:flex;gap:8px;margin-top:6px}
@@ -539,6 +657,7 @@
   <div class="actions">
     <button id="anit_apply">Применить</button>
     <button id="anit_reset">Сброс</button>
+     ${IS_OL_FRAME ? '' : '<button id="anit_prefetch">Загрузить все чаты</button>'}
     <span class="muted">(<span class="kbd">Ctrl</span>+<span class="kbd">Alt</span>+<span class="kbd">F</span> — показать/скрыть)</span>
   </div>
 </div>`;
@@ -635,8 +754,48 @@
 }
 	applyFilters();
 });
+		host.querySelector('#anit_prefetch')?.addEventListener('click', async () => {
+			try {
 
-	host.querySelectorAll('input,select').forEach(el => {
+				if (IS_OL_FRAME) {
+					console.warn('[ANIT-CHATSORTER] Prefetch: в OL-кадре пропускаем');
+					return;
+				}
+
+				const btn = host.querySelector('#anit_prefetch');
+				const origText = btn.textContent;
+				btn.disabled = true;
+				btn.textContent = 'Загружаю…';
+
+
+				const saved = JSON.parse(JSON.stringify(filters));
+
+
+				filters = defaultFilters();
+				saveFilters();
+				uiFromFilters(host);
+				applyFilters();
+
+
+				await autoScrollWithObserver({ tick: 200, idleLimit: 1500, maxTime: 60000 });
+
+
+				filters = saved;
+				saveFilters();
+				uiFromFilters(host);
+				applyFilters();
+
+				btn.textContent = origText;
+				btn.disabled = false;
+			} catch (e) {
+				console.error('[ANIT-CHATSORTER] Prefetch error', e);
+				const btn = host.querySelector('#anit_prefetch');
+				if (btn) { btn.disabled = false; btn.textContent = 'Загрузить все чаты'; }
+			}
+		});
+
+
+		host.querySelectorAll('input,select').forEach(el => {
 	el.addEventListener('change', readAndApply);
 	if (el.id === 'anit_query') el.addEventListener('keydown', (e) => { if (e.key === 'Enter') readAndApply(); });
 });
@@ -722,7 +881,7 @@
 	const itemSel = IS_OL_FRAME ? '.bx-messenger-cl-item, .bx-messenger-recent-group' : '.bx-im-list-recent-item__wrap';
 
 	obs = new MutationObserver((mutations) => {
-	// Если ушли со «внутренних чатов» — убираем плашку
+
 	const stillInternal = isInternalChatsDOM();
 	if (!IS_OL_FRAME && !stillInternal) {
 	document.getElementById('anit-filters')?.remove();
@@ -778,6 +937,7 @@
 	if (IS_OL_FRAME) await gatePromise;
 
 	await waitForBody(5000).catch(() => {});
+
 	await waitForContainer(5000).catch(() => {});
 
 	if (IS_OL_FRAME) {
@@ -790,6 +950,16 @@
 	if (IS_OL_FRAME) tsMapOnce = await getRecentTsMap().catch(() => new Map());
 
 	await rebuildList('boot', { tsMap: tsMapOnce });
+	/*if (isInternalChatsDOM){
+	autoScrollWithObserver({
+
+			tick: 250,
+			idleLimit: 1500,
+			maxTime: 60000
+	});
+
+
+	}*/
 	armObserver();
 	log('boot завершён');
 }
