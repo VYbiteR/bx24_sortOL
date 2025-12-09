@@ -23,19 +23,35 @@
 	/\/desktop_app\/\?/i.test(location.href) &&
 	(qs.get('IM_LINES') === 'Y' || /IM_LINES=Y/i.test(location.href));
 
+	function isInternalRecentDOM() {
+		return !!document.querySelector('.bx-im-list-container-recent__elements .bx-im-list-recent-item__wrap');
+	}
 
+	function isInternalTaskDOM() {
+		return !!document.querySelector('.bx-im-list-container-task__elements .bx-im-list-recent-item__wrap');
+	}
 
 	function isInternalChatsDOM() {
-	return !!document.querySelector('.bx-im-list-container-recent__elements .bx-im-list-recent-item__wrap');
-}
+		return isInternalRecentDOM() || isInternalTaskDOM();
+	}
+
+	function findContainerInternal() {
+
+		const taskList = document.querySelector('.bx-im-list-container-task__elements');
+		if (taskList) return taskList;
+		return document.querySelector('.bx-im-list-container-recent__elements');
+	}
+// 	function isInternalChatsDOM() {
+// 	return !!document.querySelector('.bx-im-list-container-recent__elements .bx-im-list-recent-item__wrap');
+// }
 
 
 	function findContainerOL() {
 	return document.querySelector('.bx-messenger-recent-wrap.bx-messenger-recent-lines-wrap');
 }
-	function findContainerInternal() {
-	return document.querySelector('.bx-im-list-container-recent__elements');
-}
+// 	function findContainerInternal() {
+// 	return document.querySelector('.bx-im-list-container-recent__elements');
+// }
 	function findContainer() {
 	if (IS_OL_FRAME) return findContainerOL();
 	if (isInternalChatsDOM()) return findContainerInternal();
@@ -102,7 +118,9 @@
 
 
 		function findInternalScrollContainer() {
-			const list = document.querySelector('.bx-im-list-container-recent__elements');
+			const list =
+				document.querySelector('.bx-im-list-container-task__elements') ||
+				document.querySelector('.bx-im-list-container-recent__elements');
 			if (!list) return null;
 
 
@@ -113,7 +131,9 @@
 			}
 
 
-			const direct = document.querySelector('.bx-im-list-recent__scroll-container');
+			const direct =
+				document.querySelector('.bx-im-list-task__scroll-container') ||
+				document.querySelector('.bx-im-list-recent__scroll-container');
 			if (direct) return direct;
 
 
@@ -584,7 +604,7 @@
 	if (document.getElementById('anit-filters')) { nukeDuplicatePanels(); return; }
 
 	nukeDuplicatePanels();
-
+	const isTasksMode = !!document.querySelector('.bx-im-list-container-task__elements');
 	const host = document.createElement('div');
 	host.id = 'anit-filters';
 	host.innerHTML = `
@@ -609,7 +629,7 @@
 </style>
 <div class="pane">
   <h4 style="position:relative;padding-right:28px;">
-    ANIT - CHAT SORTER · ${IS_OL_FRAME ? 'Контакт-центр' : 'Чаты'}
+     ANIT - CHAT SORTER · ${IS_OL_FRAME ? 'Контакт-центр' : (isTasksMode ? 'Чаты задач' : 'Чаты')}
     <button id="anit_toggle_btn" class="anit-toggle" title="Скрыть/показать (Ctrl+Alt+F)"
       style="position:absolute;right:0;top:-2px;width:22px;height:22px;border:1px solid rgba(255,255,255,.25);
              border-radius:6px;background:#0f1115;color:#fff;cursor:pointer;line-height:20px;text-align:center;">
@@ -630,7 +650,7 @@
           <option value="40">Отвеченные</option>
         </select>
       </label>
-    ` : `
+    ` : (!isTasksMode ?  `
       <div class="muted"></div>
       <div class="chips" id="anit_types">
         ${[
@@ -649,7 +669,7 @@
 	['other','Остальные'],
 	].map(([v,t]) => `<label class="chip"><input type="checkbox" value="${v}"> ${t}</label>`).join('')}
       </div>
-    `}
+    ` : ``)}
   </div>
   <div class="row">
     <input type="text" id="anit_query" placeholder="Поиск по имени/последнему сообщению">
@@ -713,10 +733,10 @@
 	if (wa) wa.checked = !!filters.onlyWhatsApp;
 	if (tg) tg.checked = !!filters.onlyTelegram;
 	if (st) st.value = String(filters.status || 'any');
-} else {
-	const sel = new Set(Array.isArray(filters.typesSelected) ? filters.typesSelected : []);
-	host.querySelectorAll('#anit_types input[type=checkbox]').forEach(cb => { cb.checked = sel.has(cb.value); });
-}
+} else if (!isTasksMode) {
+		const sel = new Set(Array.isArray(filters.typesSelected) ? filters.typesSelected : []);
+		host.querySelectorAll('#anit_types input[type=checkbox]').forEach(cb => { cb.checked = sel.has(cb.value); });
+	}
 
 	function readAndApply() {
 	filters.unreadOnly = host.querySelector('#anit_unread').checked;
@@ -727,11 +747,13 @@
 	filters.onlyWhatsApp = host.querySelector('#anit_wa')?.checked || false;
 	filters.onlyTelegram = host.querySelector('#anit_tg')?.checked || false;
 	filters.status       = host.querySelector('#anit_status')?.value || 'any';
-} else {
+	} else if (!isTasksMode){
 	const chosen = [];
 	host.querySelectorAll('#anit_types input[type=checkbox]:checked').forEach(cb => chosen.push(cb.value));
 	filters.typesSelected = chosen;
-}
+	} else {
+		filters.typesSelected = [];
+	}
 	saveFilters();
 	applyFilters();
 }
@@ -749,9 +771,9 @@
 	if (st) st.value = 'any';
 	const wa = host.querySelector('#anit_wa'), tg = host.querySelector('#anit_tg');
 	if (wa) wa.checked = false; if (tg) tg.checked = false;
-} else {
-	host.querySelectorAll('#anit_types input[type=checkbox]').forEach(cb => cb.checked = false);
-}
+	} else if (!isTasksMode) {
+		host.querySelectorAll('#anit_types input[type=checkbox]').forEach(cb => cb.checked = false);
+	}
 	applyFilters();
 });
 		host.querySelector('#anit_prefetch')?.addEventListener('click', async () => {
@@ -795,10 +817,42 @@
 		});
 
 
+		let queryTimer = null;
+		function scheduleQueryApply() {
+			if (queryTimer) clearTimeout(queryTimer);
+			queryTimer = setTimeout(() => {
+				readAndApply();
+			}, 200);
+		}
+
 		host.querySelectorAll('input,select').forEach(el => {
-	el.addEventListener('change', readAndApply);
-	if (el.id === 'anit_query') el.addEventListener('keydown', (e) => { if (e.key === 'Enter') readAndApply(); });
-});
+
+			if (el.id !== 'anit_query') {
+				el.addEventListener('change', readAndApply);
+				return;
+			}
+
+
+			const qInput = el;
+
+
+			qInput.addEventListener('input', () => {
+				scheduleQueryApply();
+			});
+
+
+			qInput.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') {
+					if (queryTimer) clearTimeout(queryTimer);
+					readAndApply();
+				}
+			});
+		});
+
+// 		host.querySelectorAll('input,select').forEach(el => {
+// 	el.addEventListener('change', readAndApply);
+// 	if (el.id === 'anit_query') el.addEventListener('keydown', (e) => { if (e.key === 'Enter') readAndApply(); });
+// });
 
 
 	makeDraggable(host, mode);
