@@ -22,7 +22,12 @@
 	IS_FRAME &&
 	/\/desktop_app\/\?/i.test(location.href) &&
 	(qs.get('IM_LINES') === 'Y' || /IM_LINES=Y/i.test(location.href));
-
+	let multiSelectMode = false;
+	let multiSelectedIds = new Set();
+	let multiRmbTimer = null;
+	let multiRmbTargetEl = null;
+	let multiPanelHost = null;
+	let multiEnteredViaRmb = false;
 	function isInternalRecentDOM() {
 		return !!document.querySelector('.bx-im-list-container-recent__elements .bx-im-list-recent-item__wrap');
 	}
@@ -41,17 +46,13 @@
 		if (taskList) return taskList;
 		return document.querySelector('.bx-im-list-container-recent__elements');
 	}
-// 	function isInternalChatsDOM() {
-// 	return !!document.querySelector('.bx-im-list-container-recent__elements .bx-im-list-recent-item__wrap');
-// }
+
 
 
 	function findContainerOL() {
 	return document.querySelector('.bx-messenger-recent-wrap.bx-messenger-recent-lines-wrap');
 }
-// 	function findContainerInternal() {
-// 	return document.querySelector('.bx-im-list-container-recent__elements');
-// }
+
 	function findContainer() {
 	if (IS_OL_FRAME) return findContainerOL();
 	if (isInternalChatsDOM()) return findContainerInternal();
@@ -256,6 +257,37 @@
 	return s;
 };
 
+		function getChatItemElement(target) {
+			if (!target) return null;
+
+			if (IS_OL_FRAME) {
+				const el = target.closest?.('.bx-messenger-cl-item');
+				if (el) return el;
+			}
+
+			// Внутренние чаты / чаты задач
+			const el2 = target.closest?.('.bx-im-list-recent-item__wrap');
+			if (el2) return el2;
+
+			return null;
+		}
+
+		function getChatIdFromElement(el) {
+			if (!el) return '';
+
+			if (IS_OL_FRAME) {
+
+				return normId(el.getAttribute('data-userid') || el.dataset.userid);
+			}
+
+
+			return normId(
+				el.getAttribute('data-id') ||
+				el.dataset.id ||
+				el.querySelector('[data-id]')?.getAttribute('data-id')
+			);
+		}
+
 	let rankMap = new Map();
 	let frozenSetSig = '';
 	let tsMapOnce = null;
@@ -324,9 +356,216 @@
 	catch { return defaultFilters(); }
 }
 	function saveFilters() { try { localStorage.setItem(LS_KEY, JSON.stringify(filters)); } catch {} }
+		function ensureMultiPanel() {
+			if (multiPanelHost) return multiPanelHost;
+
+			const host = document.createElement('div');
+			host.id = 'anit-multi-panel';
+			host.style.cssText = [
+				'position:fixed',
+				'top:8px',
+				'left:50%',
+				'transform:translateX(-50%)',
+				'z-index:9999',
+				'background:#1f232b',
+				'color:#fff',
+				'border-radius:10px',
+				'padding:6px 10px',
+				'font:12px system-ui,-apple-system,Segoe UI,Roboto,Arial',
+				'display:none',
+				'box-shadow:0 8px 24px rgba(0,0,0,.35)'
+			].join(';');
+
+			host.innerHTML = `
+	  <span id="anit-multi-count">0</span> выбрано
+	  <span style="margin:0 8px;color:rgba(255,255,255,.4)">|</span>
+	  <button data-act="later">Посмотреть позже</button>
+	  <button data-act="pin">Закрепить</button>
+	  <button data-act="unpin">Открепить</button>
+	  <button data-act="mute">Выключить звук</button>
+	  <button data-act="unmute">Включить звук</button>
+	  <button data-act="hide">Скрыть</button>
+	  <button data-act="leave">Выйти</button>
+	  <span style="margin:0 8px;color:rgba(255,255,255,.4)">|</span>
+	  <button data-act="cancel">Отмена</button>
+	`;
+			host.querySelectorAll('button').forEach(btn => {
+				btn.style.cssText = [
+					'background:#0f1115',
+					'border:1px solid rgba(255,255,255,.25)',
+					'border-radius:6px',
+					'padding:2px 6px',
+					'color:#fff',
+					'cursor:pointer',
+					'font-size:11px',
+					'margin-right:4px'
+				].join(';');
+				btn.addEventListener('click', () => {
+					const act = btn.getAttribute('data-act');
+					if (act === 'cancel') { exitMultiSelectMode(); }
+					else { applyMultiAction(act); }
+				});
+			});
+
+			document.body.appendChild(host);
+			multiPanelHost = host;
+			return host;
+		}
+
+		function updateMultiPanel() {
+			const host = ensureMultiPanel();
+			const cnt = multiSelectedIds.size;
+			const cntSpan = host.querySelector('#anit-multi-count');
+			if (cntSpan) cntSpan.textContent = String(cnt);
+			host.style.display = cnt > 0 ? 'block' : 'none';
+			if (!cnt) exitMultiSelectMode();
+		}
+
+		function enterMultiSelectMode(firstEl) {
+			if (multiSelectMode) return;
+			multiSelectMode = true;
+			multiSelectedIds.clear();
+
+			const id = getChatIdFromElement(firstEl);
+			if (id) {
+				multiSelectedIds.add(id);
+				firstEl.classList.add('anit-multi-selected');
+			}
+			updateMultiPanel();
+			log('multi-select: ON', { first: id });
+		}
+
+		function exitMultiSelectMode() {
+			if (!multiSelectMode) return;
+			multiSelectMode = false;
+			multiSelectedIds.clear();
+			document.querySelectorAll('.anit-multi-selected').forEach(el => el.classList.remove('anit-multi-selected'));
+			if (multiPanelHost) multiPanelHost.style.display = 'none';
+			multiEnteredViaRmb = false;
+			log('multi-select: OFF');
+		}
+
+		function toggleChatSelectionFromElement(el) {
+			if (!el) return;
+			const id = getChatIdFromElement(el);
+			if (!id) return;
+			if (multiSelectedIds.has(id)) {
+				multiSelectedIds.delete(id);
+				el.classList.remove('anit-multi-selected');
+			} else {
+				multiSelectedIds.add(id);
+				el.classList.add('anit-multi-selected');
+			}
+			updateMultiPanel();
+		}
+		function applyMultiAction(kind) {
+			const ids = Array.from(multiSelectedIds);
+			if (!ids.length) return;
+
+			const BXNS = window.BX || {};
+
+			log('multiAction', { kind, ids, count: ids.length });
+
+			const tasks = [];
+
+			ids.forEach((dialogId) => {
+
+				if (kind === 'pin') {
+					// /bitrix/services/main/ajax.php?action=im.v2.Chat.pin
+					if (!BXNS.ajax?.runAction) return;
+					tasks.push(
+						BXNS.ajax.runAction('im.v2.Chat.pin', {
+							data: { dialogId }
+						})
+					);
+				}
+				else if (kind === 'unpin') {
+					// /bitrix/services/main/ajax.php?action=im.v2.Chat.unpin
+					if (!BXNS.ajax?.runAction) return;
+					tasks.push(
+						BXNS.ajax.runAction('im.v2.Chat.unpin', {
+							data: { dialogId }
+						}).catch(() => {})
+					);
+				}
+				else if (kind === 'later') {
+
+					// /rest/im.v2.Chat.unread.json
+					if (!BXNS.rest?.callMethod) return;
+					tasks.push(
+						new Promise((resolve) => {
+							BXNS.rest.callMethod(
+								'im.v2.Chat.unread',
+								{ dialogId },
+								() => resolve()
+							);
+						})
+					);
+				}
+				else if (kind === 'mute') {
+					// /rest/im.chat.mute.json  action=Y
+					if (!BXNS.rest?.callMethod) return;
+					tasks.push(
+						new Promise((resolve) => {
+							BXNS.rest.callMethod(
+								'im.chat.mute',
+								{ dialog_id: dialogId, action: 'Y' },
+								() => resolve()
+							);
+						})
+					);
+				}
+				else if (kind === 'unmute') {
+					// /rest/im.chat.mute.json  action=N
+					if (!BXNS.rest?.callMethod) return;
+					tasks.push(
+						new Promise((resolve) => {
+							BXNS.rest.callMethod(
+								'im.chat.mute',
+								{ dialog_id: dialogId, action: 'N' },
+								() => resolve()
+							);
+						})
+					);
+				}
+				else if (kind === 'hide') {
+					// /rest/im.recent.hide.json
+					if (!BXNS.rest?.callMethod) return;
+					tasks.push(
+						new Promise((resolve) => {
+							BXNS.rest.callMethod(
+								'im.recent.hide',
+								{ DIALOG_ID: dialogId },
+								() => resolve()
+							);
+						})
+					);
+				}
+				else if (kind === 'leave') {
+
+					if (!BXNS.rest?.callMethod) return;
+					tasks.push(
+						new Promise((resolve) => {
+							BXNS.rest.callMethod(
+								'im.chat.leave',
+								{ DIALOG_ID: dialogId },
+								() => resolve()
+							);
+						})
+					);
+				}
+			});
 
 
-	function getItemMetaOL(el) {
+			Promise.allSettled(tasks).finally(() => {
+				exitMultiSelectMode();
+				setTimeout(() => {
+					try { applyFilters(); } catch (e) {}
+				}, 300);
+			});
+		}
+
+		function getItemMetaOL(el) {
 	const id = normId(el.getAttribute('data-userid') || el.dataset.userid);
 	const status = parseInt(el.getAttribute('data-status') || el.dataset.status || '0', 10) || 0;
 	const hasUnread = !!el.querySelector('.bx-messenger-cl-count-digit');
@@ -626,6 +865,9 @@
 #anit-filters .chips{display:flex;flex-wrap:wrap;gap:6px}
 #anit-filters .chip{display:inline-flex;gap:6px;align-items:center;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:3px 8px;background:#0f1115}
 #anit-filters .chip input{accent-color:#5dc}
+.anit-multi-selected {background: rgba(93, 220, 200, 0.15) !important;}
+.anit-multi-selected::before {content: '✓';position: absolute;left: 6px;top: 50%;transform: translateY(-50%);font-size: 12px;color: #5dc;z-index: 2;}
+.bx-im-list-recent-item__wrap.anit-multi-selected, .bx-messenger-cl-item.anit-multi-selected {position: relative;}
 </style>
 <div class="pane">
   <h4 style="position:relative;padding-right:28px;">
@@ -849,10 +1091,7 @@
 			});
 		});
 
-// 		host.querySelectorAll('input,select').forEach(el => {
-// 	el.addEventListener('change', readAndApply);
-// 	if (el.id === 'anit_query') el.addEventListener('keydown', (e) => { if (e.key === 'Enter') readAndApply(); });
-// });
+
 
 
 	makeDraggable(host, mode);
@@ -867,9 +1106,9 @@
 	if (!container) { warn('rebuild: контейнер не найден'); return; }
 
 	if (!IS_OL_FRAME) {
-	applyFilters();
-	return;
-}
+		applyFilters();
+		return;
+	}
 
 	const tsMapLocal = opts.tsMap || tsMapOnce || new Map();
 	container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
@@ -881,43 +1120,43 @@
 	const setSig = currentSetSignature(ids);
 
 	if (rankMap.size && setSig === frozenSetSig) {
-	const orderSigNow = currentOrderSignature(ids);
-	const shouldBe = Array.from(ids).sort((a, b) => (rankMap.get(a) ?? 1e9) - (rankMap.get(b) ?? 1e9));
-	const wantedSig = currentOrderSignature(shouldBe);
-	if (orderSigNow !== wantedSig) {
-	const mapById = new Map(items.map(el => [normId(el.getAttribute('data-userid') || el.dataset.userid), el]));
-	const frag = document.createDocumentFragment();
-	for (const id of shouldBe) { const el = mapById.get(id); if (el) frag.appendChild(el); }
-	container.appendChild(frag);
-	lastOrderSig = wantedSig;
-	log('reapply frozen order.', { total: items.length, reason });
-}
-	applyFilters();
-	rebuildDateGroups(tsMapLocal);
-	return;
+		const orderSigNow = currentOrderSignature(ids);
+		const shouldBe = Array.from(ids).sort((a, b) => (rankMap.get(a) ?? 1e9) - (rankMap.get(b) ?? 1e9));
+		const wantedSig = currentOrderSignature(shouldBe);
+		if (orderSigNow !== wantedSig) {
+			const mapById = new Map(items.map(el => [normId(el.getAttribute('data-userid') || el.dataset.userid), el]));
+			const frag = document.createDocumentFragment();
+			for (const id of shouldBe) { const el = mapById.get(id); if (el) frag.appendChild(el); }
+			container.appendChild(frag);
+			lastOrderSig = wantedSig;
+			log('reapply frozen order.', { total: items.length, reason });
+		}
+		applyFilters();
+		rebuildDateGroups(tsMapLocal);
+		return;
 }
 
 	const currentIndex = new Map(items.map((el, i) => [el, i]));
 	items.sort((a, b) => {
-	const aId = normId(a.getAttribute('data-userid') || a.dataset.userid);
-	const bId = normId(b.getAttribute('data-userid') || b.dataset.userid);
-	const ra = rankMap.has(aId) ? rankMap.get(aId) : 1e9;
-	const rb = rankMap.has(bId) ? rankMap.get(bId) : 1e9;
-	if (ra !== rb) return ra - rb;
-	const ta = tsMapLocal.get(aId) ?? -1;
-	const tb = tsMapLocal.get(bId) ?? -1;
-	if (ta !== tb) return tb - ta;
-	return (currentIndex.get(a) ?? 0) - (currentIndex.get(b) ?? 0);
-});
+		const aId = normId(a.getAttribute('data-userid') || a.dataset.userid);
+		const bId = normId(b.getAttribute('data-userid') || b.dataset.userid);
+		const ra = rankMap.has(aId) ? rankMap.get(aId) : 1e9;
+		const rb = rankMap.has(bId) ? rankMap.get(bId) : 1e9;
+		if (ra !== rb) return ra - rb;
+		const ta = tsMapLocal.get(aId) ?? -1;
+		const tb = tsMapLocal.get(bId) ?? -1;
+		if (ta !== tb) return tb - ta;
+		return (currentIndex.get(a) ?? 0) - (currentIndex.get(b) ?? 0);
+	});
 
 	const newIds = items.map(el => normId(el.getAttribute('data-userid') || el.dataset.userid));
 	const newOrderSig = currentOrderSignature(newIds);
 	if (newOrderSig !== lastOrderSig) {
-	const frag = document.createDocumentFragment();
-	for (const el of items) frag.appendChild(el);
-	container.appendChild(frag);
-	lastOrderSig = newOrderSig;
-}
+		const frag = document.createDocumentFragment();
+		for (const el of items) frag.appendChild(el);
+			container.appendChild(frag);
+			lastOrderSig = newOrderSig;
+	}
 
 	rankMap = new Map(newIds.map((id, i) => [id, i]));
 	frozenSetSig = currentSetSignature(newIds);
@@ -925,33 +1164,33 @@
 	log('rebuild ok.', { total: items.length, source: tsMapLocal.size ? 'rest' : 'dom', reason });
 	applyFilters();
 	rebuildDateGroups(tsMapLocal);
-}
+	}
 
 	function armObserver() {
-	const container = findContainer();
-	if (!container) return;
-	if (obs) obs.disconnect();
+		const container = findContainer();
+		if (!container) return;
+		if (obs) obs.disconnect();
 
-	const itemSel = IS_OL_FRAME ? '.bx-messenger-cl-item, .bx-messenger-recent-group' : '.bx-im-list-recent-item__wrap';
+		const itemSel = IS_OL_FRAME ? '.bx-messenger-cl-item, .bx-messenger-recent-group' : '.bx-im-list-recent-item__wrap';
 
-	obs = new MutationObserver((mutations) => {
+		obs = new MutationObserver((mutations) => {
 
-	const stillInternal = isInternalChatsDOM();
-	if (!IS_OL_FRAME && !stillInternal) {
-	document.getElementById('anit-filters')?.remove();
-	filtersHost = null;
-	return;
-}
+		const stillInternal = isInternalChatsDOM();
+		if (!IS_OL_FRAME && !stillInternal) {
+		document.getElementById('anit-filters')?.remove();
+		filtersHost = null;
+		return;
+	}
 
 	let need = false;
 	for (const m of mutations) {
-	if (m.type === 'childList') {
-	if ([...m.addedNodes, ...m.removedNodes].some(n =>
-	n.nodeType === 1 &&
-	(n.matches?.(itemSel) || n.querySelector?.(itemSel))
-	)) { need = true; break; }
-}
-}
+		if (m.type === 'childList') {
+		if ([...m.addedNodes, ...m.removedNodes].some(n =>
+			n.nodeType === 1 &&
+			(n.matches?.(itemSel) || n.querySelector?.(itemSel))
+			)) { need = true; break; }
+		}
+	}
 	if (!need) return;
 	if (rebuildScheduled) return;
 	rebuildScheduled = true;
@@ -1014,7 +1253,88 @@
 
 
 	}*/
-	armObserver();
+
+		function armMultiSelectHandlers() {
+
+			document.addEventListener('mousedown', (e) => {
+				if (e.button !== 2) return;
+				const el = getChatItemElement(e.target);
+				if (!el) return;
+
+
+				if (multiSelectMode) return;
+
+				multiRmbTargetEl = el;
+				if (multiRmbTimer) clearTimeout(multiRmbTimer);
+				multiRmbTimer = setTimeout(() => {
+					multiRmbTimer = null;
+
+					enterMultiSelectMode(multiRmbTargetEl);
+					multiEnteredViaRmb = true;
+				}, 600); // длительность клика ПКМ
+			}, true);
+
+
+			document.addEventListener('mouseup', (e) => {
+				if (e.button === 2 && multiRmbTimer) {
+					clearTimeout(multiRmbTimer);
+					multiRmbTimer = null;
+				}
+
+			}, true);
+
+			document.addEventListener('mouseleave', () => {
+				if (multiRmbTimer) {
+					clearTimeout(multiRmbTimer);
+					multiRmbTimer = null;
+				}
+			}, true);
+
+
+			document.addEventListener('contextmenu', (e) => {
+				if (!multiSelectMode) return;
+				const el = getChatItemElement(e.target);
+				if (!el) return;
+
+				e.preventDefault();
+				e.stopPropagation();
+				const id = getChatIdFromElement(el);
+				if (
+					multiEnteredViaRmb &&
+					id &&
+					multiSelectedIds.size === 1 &&
+					multiSelectedIds.has(id)
+				) {
+					multiEnteredViaRmb = false;
+					return;
+				}
+
+				multiEnteredViaRmb = false;
+				toggleChatSelectionFromElement(el);
+			}, true);
+
+
+			document.addEventListener('click', (e) => {
+				if (!multiSelectMode) return;
+				const el = getChatItemElement(e.target);
+				if (!el) return;
+
+				e.preventDefault();
+				e.stopPropagation();
+				toggleChatSelectionFromElement(el);
+			}, true);
+
+
+			document.addEventListener('keydown', (e) => {
+				if (!multiSelectMode) return;
+				if (e.key === 'Escape') {
+					exitMultiSelectMode();
+				}
+			}, true);
+		}
+
+		armObserver();
+		armMultiSelectHandlers();
 	log('boot завершён');
 }
 
