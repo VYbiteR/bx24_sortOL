@@ -3,9 +3,9 @@
 	(function () {
 
 	if (window.__ANITREC_RUNNING__) { return; }
-	window.__ANITREC_RUNNING__ = '1.15.0';
+	window.__ANITREC_RUNNING__ = '1.16.0';
 
-	const VER = '1.15.0';
+	const VER = '1.16.0';
 	const TAG = 'ANIT: CHAT SORTER';
 	const LBL = `%c[${TAG}]`;
 	const CSS_LOG  = 'background:#000;color:#fff;padding:1px 4px;border-radius:3px';
