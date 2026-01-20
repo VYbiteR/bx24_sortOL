@@ -814,23 +814,78 @@
 
 
 		function hotkeyHandler(e){
+			// Ctrl+Alt+F — показать/скрыть панель
+			if (e.ctrlKey && e.altKey && e.code === 'KeyF') {
+				const pane = document.getElementById('anit-filters');
+				if (!pane) return;
 
-			if (!e.ctrlKey || !e.altKey) return;
-			if (e.code !== 'KeyF') return;
+				const nowHidden = pane.classList.contains('anit-hidden');
+				if (nowHidden) pane.classList.remove('anit-hidden');
+				else pane.classList.add('anit-hidden');
 
-			const pane = document.getElementById('anit-filters');
-			if (!pane) return;
+				try { localStorage.setItem('anit.filters.hidden', pane.classList.contains('anit-hidden') ? '1' : '0'); } catch {}
 
+				e.stopImmediatePropagation();
+				e.preventDefault();
+				return;
+			}
 
-			const nowHidden = pane.classList.contains('anit-hidden');
-			if (nowHidden) pane.classList.remove('anit-hidden');
-			else pane.classList.add('anit-hidden');
+			// Ctrl+Q — в диалоге (чаты задач): обрамить выделенный текст линиями
+			if (e.ctrlKey && !e.altKey && !e.shiftKey && e.code === 'KeyQ') {
+				if (!isTasksChatsModeNow()) return;
 
-			try { localStorage.setItem('anit.filters.hidden', pane.classList.contains('anit-hidden') ? '1' : '0'); } catch {}
+				const active = document.activeElement;
+				if (!active) return;
+				// не мешаем вводу в поиске по чатам/панели
+				if (active.id === 'anit_query') return;
 
+				const line = '------------------------------------------------------';
+				const wrap = (s) => `${line}\n${s}\n${line}`;
 
-			e.stopImmediatePropagation();
-			e.preventDefault();
+				// textarea / input
+				if (active instanceof HTMLTextAreaElement || (active instanceof HTMLInputElement && (active.type || '').toLowerCase() === 'text')) {
+					const start = active.selectionStart ?? 0;
+					const end = active.selectionEnd ?? 0;
+					if (end <= start) return;
+					const v = active.value || '';
+					const selText = v.slice(start, end);
+					const next = v.slice(0, start) + wrap(selText) + v.slice(end);
+					active.value = next;
+					const newEnd = start + wrap(selText).length;
+					active.selectionStart = start;
+					active.selectionEnd = newEnd;
+					active.dispatchEvent(new Event('input', { bubbles: true }));
+
+					e.stopImmediatePropagation();
+					e.preventDefault();
+					return;
+				}
+
+				// contenteditable
+				const isCE = active instanceof HTMLElement && (active.isContentEditable || active.getAttribute('contenteditable') === 'true');
+				if (isCE) {
+					const sel = window.getSelection?.();
+					if (!sel || sel.rangeCount === 0) return;
+					if (sel.isCollapsed) return;
+					const range = sel.getRangeAt(0);
+					// ограничим замену выделения только если оно внутри active
+					const anc = sel.anchorNode;
+					if (anc && active.contains(anc)) {
+						const txt = sel.toString();
+						range.deleteContents();
+						range.insertNode(document.createTextNode(wrap(txt)));
+						sel.removeAllRanges();
+						const r2 = document.createRange();
+						r2.selectNodeContents(active);
+						r2.collapse(false);
+						sel.addRange(r2);
+						active.dispatchEvent(new Event('input', { bubbles: true }));
+
+						e.stopImmediatePropagation();
+						e.preventDefault();
+					}
+				}
+			}
 		}
 
 
