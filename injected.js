@@ -349,6 +349,7 @@
 	onlyWhatsApp: false,
 	onlyTelegram: false,
 	typesSelected: [],
+	hideCompletedTasks: false,
 });
 	let filters = loadFilters();
 	function loadFilters() {
@@ -633,9 +634,21 @@
 	return getItemMetaInternal(el);
 }
 
+	function isTasksChatsModeNow() {
+		return !!document.querySelector('.bx-im-list-container-task__elements');
+	}
+
+	function isTaskCompletedByLastMessage(meta) {
+		const t = (meta?.lastText || '').toLowerCase();
+		return t.includes('завершил задачу') || t.includes('принял задачу');
+	}
+
 	function matchByFilters(meta) {
 	if (filters.unreadOnly && !meta.hasUnread) return false;
 	if (filters.withAttach && !meta.hasAttach) return false;
+	if (!IS_OL_FRAME && filters.hideCompletedTasks && isTasksChatsModeNow()) {
+		if (isTaskCompletedByLastMessage(meta)) return false;
+	}
 	if (IS_OL_FRAME) {
 	if (filters.onlyWhatsApp && !meta.isWhatsApp) return false;
 	if (filters.onlyTelegram && !meta.isTelegram) return false;
@@ -687,6 +700,8 @@
 			host.querySelector('#anit_unread').checked = !!filters.unreadOnly;
 			host.querySelector('#anit_attach').checked = !!filters.withAttach;
 			host.querySelector('#anit_query').value = String(filters.query || '');
+			const hc = host.querySelector('#anit_hide_completed');
+			if (hc) hc.checked = !!filters.hideCompletedTasks;
 			if (IS_OL_FRAME) {
 				const wa = host.querySelector('#anit_wa'),
 					tg = host.querySelector('#anit_tg'),
@@ -704,6 +719,7 @@
 			filters.unreadOnly = host.querySelector('#anit_unread').checked;
 			filters.withAttach = host.querySelector('#anit_attach').checked;
 			filters.query      = host.querySelector('#anit_query').value;
+			filters.hideCompletedTasks = host.querySelector('#anit_hide_completed')?.checked || false;
 			if (IS_OL_FRAME) {
 				filters.onlyWhatsApp = host.querySelector('#anit_wa')?.checked || false;
 				filters.onlyTelegram = host.querySelector('#anit_tg')?.checked || false;
@@ -881,6 +897,9 @@
   <div class="row">
     <label><input type="checkbox" id="anit_unread"> Непрочитанные</label>
     <label><input type="checkbox" id="anit_attach"> С вложениями</label>
+	${isTasksMode ? `
+	  <label><input type="checkbox" id="anit_hide_completed"> Скрыть завершённые</label>
+	` : ``}
     ${IS_OL_FRAME ? `
       <label><input type="checkbox" id="anit_wa"> WhatsApp</label>
       <label><input type="checkbox" id="anit_tg"> Telegram</label>
@@ -969,6 +988,8 @@
 	host.querySelector('#anit_unread').checked = !!filters.unreadOnly;
 	host.querySelector('#anit_attach').checked = !!filters.withAttach;
 	host.querySelector('#anit_query').value = String(filters.query || '');
+	const hc = host.querySelector('#anit_hide_completed');
+	if (hc) hc.checked = !!filters.hideCompletedTasks;
 
 	if (IS_OL_FRAME) {
 	const wa = host.querySelector('#anit_wa'), tg = host.querySelector('#anit_tg'), st = host.querySelector('#anit_status');
@@ -984,6 +1005,7 @@
 	filters.unreadOnly = host.querySelector('#anit_unread').checked;
 	filters.withAttach = host.querySelector('#anit_attach').checked;
 	filters.query      = host.querySelector('#anit_query').value;
+	filters.hideCompletedTasks = host.querySelector('#anit_hide_completed')?.checked || false;
 
 	if (IS_OL_FRAME) {
 	filters.onlyWhatsApp = host.querySelector('#anit_wa')?.checked || false;
@@ -1007,6 +1029,8 @@
 	saveFilters();
 	host.querySelector('#anit_unread').checked = false;
 	host.querySelector('#anit_attach').checked = false;
+	const hc = host.querySelector('#anit_hide_completed');
+	if (hc) hc.checked = false;
 	host.querySelector('#anit_query').value = '';
 	if (wasOL) {
 	const st = host.querySelector('#anit_status');
