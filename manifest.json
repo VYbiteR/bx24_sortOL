@@ -3,8 +3,12 @@
   "name": "ANIT B24 CHAT SORTER",
   "version": "1.16.0",
   "description": "Отключение группировки Открытых линий, фильтры для чатов",
-  "permissions": [],
-  "host_permissions": ["*://*.bitrix24.ru/*"],
+  "permissions": ["storage"],
+  "host_permissions": ["*://*.bitrix24.ru/*", "<all_urls>"],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "content_scripts": [
     {
       "matches": ["*://*.bitrix24.ru/*"],

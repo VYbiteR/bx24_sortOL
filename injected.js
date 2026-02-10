@@ -59,6 +59,17 @@
 	return null;
 }
 
+	function getCurrentPortalHost() {
+		return window.location.host;
+	}
+
+	function extractChatIdNumber(el) {
+		const id = (el?.dataset?.id || el?.getAttribute?.('data-id') || el?.querySelector?.('[data-id]')?.getAttribute?.('data-id') || '').toString();
+		if (!id.startsWith('chat')) return null;
+		const n = parseInt(id.slice(4), 10);
+		return Number.isFinite(n) ? n : null;
+	}
+
 
 	const OL_URL_RX =
 	/(\/rest\/.*im\.recent\.(list|get|pin)|\/bitrix\/services\/main\/ajax\.php\?[^#]*action=im\.recent\.(list|get|pin))/i;
@@ -350,6 +361,8 @@
 	onlyTelegram: false,
 	typesSelected: [],
 	hideCompletedTasks: false,
+	projectIndexes: [],
+	sortMode: 'native',
 });
 	let filters = loadFilters();
 	function loadFilters() {
@@ -626,7 +639,27 @@
 
 	const hasAttach = /\[(вложение|файл)\]/i.test(lastText);
 
-	return { id, hasUnread, lastText, title, hasAttach, type: itemType, status: 0, isWhatsApp: false, isTelegram: false };
+	const meta = { id, hasUnread, lastText, title, hasAttach, type: itemType, status: 0, isWhatsApp: false, isTelegram: false };
+
+	// project mapping only in "task chats" mode
+	if (isTasksChatsModeNow() && window.__anitProjectLookup?.chatToProject) {
+		const chatId = extractChatIdNumber(el);
+		if (chatId !== null) {
+			const chatToProject = window.__anitProjectLookup.chatToProject;
+			const map = chatToProject instanceof Map ? chatToProject : new Map(chatToProject || []);
+			const pIdx = map.get(chatId);
+			if (pIdx !== undefined) {
+				const p = (window.__anitProjectLookup.projects || [])[pIdx];
+				meta.projectIndex = pIdx;
+				meta.projectName = (p && p[1]) ? p[1] : 'Без проекта';
+			} else {
+				meta.projectIndex = -1;
+				meta.projectName = 'Без проекта';
+			}
+		}
+	}
+
+	return meta;
 }
 
 	function getItemMeta(el) {
@@ -635,7 +668,14 @@
 }
 
 	function isTasksChatsModeNow() {
-		return !!document.querySelector('.bx-im-list-container-task__elements');
+		// В разных версиях интерфейса Bitrix24 селекторы отличаются.
+		// Нам важно лишь понять, что открыт список "чаты задач".
+		return !!(
+			document.querySelector('.bx-im-list-container-task__elements .bx-im-list-recent-item__wrap') ||
+			document.querySelector('.bx-im-list-container-task__elements') ||
+			document.querySelector('.bx-im-list-task__scroll-container .bx-im-list-recent-item__wrap') ||
+			document.querySelector('.bx-im-list-task__scroll-container')
+		);
 	}
 
 	function isTaskCompletedByLastMessage(meta) {
@@ -659,9 +699,17 @@
 }
 	const q = (filters.query || '').trim().toLowerCase();
 	if (q) {
-	const hay = (meta.title || '') + ' ' + (meta.lastText || '');
-	if (!hay.includes(q)) return false;
+	const haystack = [meta.title, meta.lastText, meta.projectName].filter(Boolean).join(' ').toLowerCase();
+	if (!haystack.includes(q)) return false;
 }
+	// project filter only in "task chats" mode
+	if (!IS_OL_FRAME && isTasksChatsModeNow()) {
+		const pSel = Array.isArray(filters.projectIndexes) ? filters.projectIndexes : [];
+		if (pSel.length) {
+			const pi = (typeof meta.projectIndex === 'number') ? meta.projectIndex : -1;
+			if (!pSel.includes(pi)) return false;
+		}
+	}
 	return true;
 }
 
@@ -679,6 +727,26 @@
 	const meta = getItemMeta(el);
 	el.style.display = matchByFilters(meta) ? '' : 'none';
 }
+	if (!IS_OL_FRAME && window.__anitProjectLookup && (filters.sortMode === 'project' || filters.sortMode === 'projectName')) {
+		const visible = items.filter(el => el.style.display !== 'none');
+		const hidden = items.filter(el => el.style.display === 'none');
+		const withMeta = visible.map(el => ({ el, meta: getItemMeta(el) }));
+		withMeta.sort((a, b) => {
+			const pa = a.meta.projectIndex ?? -2;
+			const pb = b.meta.projectIndex ?? -2;
+			if (pa !== pb) return pa - pb;
+			if (filters.sortMode === 'projectName') {
+				const ta = (a.meta.title || '').toLowerCase();
+				const tb = (b.meta.title || '').toLowerCase();
+				return ta.localeCompare(tb);
+			}
+			return 0;
+		});
+		const frag = document.createDocumentFragment();
+		withMeta.forEach(({ el }) => frag.appendChild(el));
+		hidden.forEach(el => frag.appendChild(el));
+		container.appendChild(frag);
+	}
 	if (IS_OL_FRAME) rebuildDateGroups(tsMapOnce || new Map());
 }
 
@@ -713,6 +781,13 @@
 				const sel = new Set(Array.isArray(filters.typesSelected) ? filters.typesSelected : []);
 				host.querySelectorAll('#anit_types input[type=checkbox]').forEach(cb => { cb.checked = sel.has(cb.value); });
 			}
+			if (window.__anitProjectLookup && host.querySelector('#anit_project_list')) {
+				const projSel = new Set((Array.isArray(filters.projectIndexes) ? filters.projectIndexes : []).map(String));
+				host.querySelectorAll('#anit_project_list input[name="anit_project"]').forEach(cb => { cb.checked = projSel.has(cb.value); });
+				try { updateProjectButtonLabel?.(); } catch {}
+			}
+			const sortSel = host.querySelector('#anit_sort_mode');
+			if (sortSel) sortSel.value = (filters.sortMode === 'project' || filters.sortMode === 'projectName') ? filters.sortMode : 'native';
 		}
 
 		function filtersFromUI(host){
@@ -729,6 +804,13 @@
 				host.querySelectorAll('#anit_types input[type=checkbox]:checked').forEach(cb => chosen.push(cb.value));
 				filters.typesSelected = chosen;
 			}
+			if (host.querySelector('#anit_project_list')) {
+				const chosen = [];
+				host.querySelectorAll('#anit_project_list input[name="anit_project"]:checked').forEach(cb => chosen.push(parseInt(cb.value, 10)));
+				filters.projectIndexes = chosen;
+			}
+			const sortSel = host.querySelector('#anit_sort_mode');
+			if (sortSel) filters.sortMode = sortSel.value || 'native';
 		}
 
 		function clamp(val, min, max) { return Math.min(Math.max(val, min), max); }
@@ -914,7 +996,7 @@
 	if (document.getElementById('anit-filters')) { nukeDuplicatePanels(); return; }
 
 	nukeDuplicatePanels();
-	const isTasksMode = !!document.querySelector('.bx-im-list-container-task__elements');
+	const isTasksMode = isTasksChatsModeNow();
 	const host = document.createElement('div');
 	host.id = 'anit-filters';
 	host.innerHTML = `
@@ -990,6 +1072,39 @@
   <div class="row">
     <input type="text" id="anit_query" placeholder="Поиск по имени/последнему сообщению">
   </div>
+  <div class="row" id="anit_projects_row" style="display:none; position:relative">
+    <span class="muted">Проект:</span>
+
+    <div id="anit_project_picker" style="position:relative;">
+      <button id="anit_project_btn" type="button" style="min-width:220px;text-align:left;">
+        Все проекты
+      </button>
+
+      <div id="anit_project_pop" style="display:none; position:absolute; top:28px; left:0; width:320px; z-index:10000;">
+        <div style="background:#1f232b;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:8px;box-shadow:0 8px 24px rgba(0,0,0,.35)">
+          <div class="row" style="margin:0 0 6px 0">
+            <input type="text" id="anit_project_search" placeholder="Поиск проекта…" style="width:100%">
+          </div>
+
+          <div style="max-height:260px; overflow:auto; padding-right:4px" id="anit_project_list"></div>
+
+          <div class="row" style="margin:8px 0 0 0; justify-content:space-between">
+            <button type="button" id="anit_project_all">Все</button>
+            <button type="button" id="anit_project_none">Снять</button>
+            <button type="button" id="anit_project_close">Закрыть</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="row" id="anit_sort_row" style="display:none">
+    <span class="muted">Сортировка:</span>
+    <select id="anit_sort_mode">
+      <option value="native">Как в Битрикс</option>
+      <option value="project">По проекту</option>
+      <option value="projectName">По проекту и названию</option>
+    </select>
+  </div>
   <div class="actions">
     <button id="anit_apply">Применить</button>
     <button id="anit_reset">Сброс</button>
@@ -999,6 +1114,182 @@
 </div>`;
 	document.body.appendChild(host);
 	filtersHost = host;
+
+		function getProjectsSafe() {
+			const p = window.__anitProjectLookup?.projects;
+			return Array.isArray(p) ? p : null;
+		}
+
+		function getSelectedProjectIndexes() {
+			const arr = Array.isArray(filters.projectIndexes) ? filters.projectIndexes : [];
+			return arr.filter(n => Number.isFinite(n));
+		}
+
+		function setSelectedProjectIndexes(nextArr) {
+			filters.projectIndexes = Array.from(new Set(nextArr)).filter(n => Number.isFinite(n));
+		}
+
+		function updateProjectButtonLabel() {
+			const btn = host.querySelector('#anit_project_btn');
+			if (!btn) return;
+
+			const projects = getProjectsSafe();
+			if (!projects) { btn.textContent = 'Проект: (нет данных)'; return; }
+
+			const chosen = new Set(getSelectedProjectIndexes());
+			if (!chosen.size) {
+				btn.textContent = 'Все проекты';
+				return;
+			}
+
+			const names = [];
+			for (const idx of chosen) {
+				if (idx === -1) { names.push('Без проекта'); continue; }
+				const p = projects[idx];
+				const nm = p && p[1] ? String(p[1]) : '';
+				if (nm) names.push(nm);
+				if (names.length >= 2) break;
+			}
+			const extra = chosen.size - names.length;
+			btn.textContent = extra > 0 ? `${names.join(', ')} +${extra}` : names.join(', ');
+		}
+
+		function renderProjectList(filterText = '') {
+			const list = host.querySelector('#anit_project_list');
+			if (!list) return;
+
+			const projects = getProjectsSafe();
+			if (!projects) { list.innerHTML = '<div class="muted">Маппинг не загружен</div>'; return; }
+
+			const q = String(filterText || '').trim().toLowerCase();
+			const chosen = new Set(getSelectedProjectIndexes().map(Number));
+
+			const mkRow = (value, label) => {
+				const wrap = document.createElement('label');
+				wrap.className = 'chip';
+				wrap.style.display = 'flex';
+				wrap.style.width = '100%';
+				wrap.style.justifyContent = 'flex-start';
+
+				const cb = document.createElement('input');
+				cb.type = 'checkbox';
+				cb.name = 'anit_project';
+				cb.value = String(value);
+				cb.checked = chosen.has(Number(value));
+
+				cb.addEventListener('change', () => {
+					const v = parseInt(cb.value, 10);
+					const cur = new Set(getSelectedProjectIndexes().map(Number));
+					if (cb.checked) cur.add(v);
+					else cur.delete(v);
+					setSelectedProjectIndexes(Array.from(cur));
+					updateProjectButtonLabel();
+				});
+
+				wrap.appendChild(cb);
+				wrap.appendChild(document.createTextNode(' ' + label));
+				return wrap;
+			};
+
+			list.innerHTML = '';
+
+			const noProjLabel = mkRow(-1, 'Без проекта');
+			if (!q || 'без проекта'.includes(q)) list.appendChild(noProjLabel);
+
+			for (let i = 0; i < projects.length; i++) {
+				const p = projects[i];
+				const name = (p && p[1]) ? String(p[1]) : '';
+				if (!name) continue;
+				if (q && !name.toLowerCase().includes(q)) continue;
+				list.appendChild(mkRow(i, name));
+			}
+
+			if (!list.childElementCount) {
+				list.innerHTML = '<div class="muted">Ничего не найдено</div>';
+			}
+		}
+
+		function openProjectPop() {
+			const pop = host.querySelector('#anit_project_pop');
+			if (!pop) return;
+			pop.style.display = 'block';
+			const inp = host.querySelector('#anit_project_search');
+			if (inp) { inp.value = ''; inp.focus(); }
+			renderProjectList('');
+		}
+
+		function closeProjectPop() {
+			const pop = host.querySelector('#anit_project_pop');
+			if (!pop) return;
+			pop.style.display = 'none';
+		}
+
+		(function initProjectPicker() {
+			const row = host.querySelector('#anit_projects_row');
+			if (!row) return;
+
+			// Показываем проекты только в режиме "чаты задач"
+			if (!isTasksChatsModeNow()) {
+				row.style.display = 'none';
+				const sortRow = host.querySelector('#anit_sort_row');
+				if (sortRow) sortRow.style.display = 'none';
+				return;
+			}
+
+			row.style.display = 'flex';
+			const sortRow = host.querySelector('#anit_sort_row');
+			if (sortRow) sortRow.style.display = 'flex';
+
+			// Если маппинга нет — всё равно показываем UI (чтобы было понятно, что его нужно настроить)
+			updateProjectButtonLabel();
+			renderProjectList('');
+
+			host.querySelector('#anit_project_btn')?.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				const pop = host.querySelector('#anit_project_pop');
+				if (!pop) return;
+				if (pop.style.display === 'block') closeProjectPop();
+				else openProjectPop();
+			});
+
+			host.querySelector('#anit_project_close')?.addEventListener('click', (e) => {
+				e.preventDefault();
+				closeProjectPop();
+				saveFilters();
+				applyFilters();
+			});
+
+			host.querySelector('#anit_project_all')?.addEventListener('click', (e) => {
+				e.preventDefault();
+				setSelectedProjectIndexes([]);
+				updateProjectButtonLabel();
+				renderProjectList(host.querySelector('#anit_project_search')?.value || '');
+			});
+
+			host.querySelector('#anit_project_none')?.addEventListener('click', (e) => {
+				e.preventDefault();
+				setSelectedProjectIndexes([]);
+				updateProjectButtonLabel();
+				renderProjectList(host.querySelector('#anit_project_search')?.value || '');
+			});
+
+			host.querySelector('#anit_project_search')?.addEventListener('input', (e) => {
+				renderProjectList(e.target.value);
+			});
+
+			document.addEventListener('mousedown', (e) => {
+				const pop = host.querySelector('#anit_project_pop');
+				if (!pop || pop.style.display !== 'block') return;
+				const picker = host.querySelector('#anit_project_picker');
+				if (picker && !picker.contains(e.target)) closeProjectPop();
+			}, true);
+
+			document.addEventListener('keydown', (e) => {
+				if (e.key === 'Escape') closeProjectPop();
+			}, true);
+		})();
+
 		const HIDE_LS_KEY = 'anit.filters.hidden';
 		function setHidden(hidden) {
 			if (hidden) host.classList.add('anit-hidden');
@@ -1055,6 +1346,13 @@
 		const sel = new Set(Array.isArray(filters.typesSelected) ? filters.typesSelected : []);
 		host.querySelectorAll('#anit_types input[type=checkbox]').forEach(cb => { cb.checked = sel.has(cb.value); });
 	}
+	if (window.__anitProjectLookup && host.querySelector('#anit_project_list')) {
+		const projSel = new Set((Array.isArray(filters.projectIndexes) ? filters.projectIndexes : []).map(String));
+		host.querySelectorAll('#anit_project_list input[name="anit_project"]').forEach(cb => { cb.checked = projSel.has(cb.value); });
+		try { updateProjectButtonLabel?.(); } catch {}
+	}
+	const sortSelInit = host.querySelector('#anit_sort_mode');
+	if (sortSelInit) sortSelInit.value = (filters.sortMode === 'project' || filters.sortMode === 'projectName') ? filters.sortMode : 'native';
 
 	function readAndApply() {
 	filters.unreadOnly = host.querySelector('#anit_unread').checked;
@@ -1073,6 +1371,13 @@
 	} else {
 		filters.typesSelected = [];
 	}
+	if (host.querySelector('#anit_project_list')) {
+		const chosen = [];
+		host.querySelectorAll('#anit_project_list input[name="anit_project"]:checked').forEach(cb => chosen.push(parseInt(cb.value, 10)));
+		filters.projectIndexes = chosen;
+	}
+	const sortSel = host.querySelector('#anit_sort_mode');
+	if (sortSel) filters.sortMode = sortSel.value || 'native';
 	saveFilters();
 	applyFilters();
 }
@@ -1095,6 +1400,11 @@
 	} else if (!isTasksMode) {
 		host.querySelectorAll('#anit_types input[type=checkbox]').forEach(cb => cb.checked = false);
 	}
+	if (host.querySelector('#anit_project_list')) {
+		host.querySelectorAll('#anit_project_list input[name="anit_project"]').forEach(cb => cb.checked = false);
+	}
+	const sortSel = host.querySelector('#anit_sort_mode');
+	if (sortSel) sortSel.value = 'native';
 	applyFilters();
 });
 		host.querySelector('#anit_prefetch')?.addEventListener('click', async () => {
@@ -1412,10 +1722,83 @@
 			}, true);
 		}
 
+		window.addEventListener('message', (e) => {
+			if (!e.data || e.data.type !== 'anit-mapping-updated' || !e.data.projects) return;
+			window.__anitProjectLookup = {
+				projects: e.data.projects,
+				chatToProject: new Map(Array.isArray(e.data.chatToProject) ? e.data.chatToProject : [])
+			};
+			try { applyFilters(); } catch (err) {}
+			try {
+				if (filtersHost) {
+					document.getElementById('anit-filters')?.remove();
+					filtersHost = null;
+					buildFiltersPanel().then(() => applyFilters());
+				}
+			} catch {}
+		});
+
 		armObserver();
 		armMultiSelectHandlers();
 	log('boot завершён');
 }
+
+	function decodeDeltaMap(dmap) {
+		const map = new Map();
+		if (!Array.isArray(dmap) || dmap.length < 2) return map;
+
+		let chatId = Number(dmap[0]);
+		let idx = Number(dmap[1]);
+		if (Number.isFinite(chatId) && Number.isFinite(idx)) map.set(chatId, idx);
+
+		for (let i = 2; i < dmap.length; i += 2) {
+			const delta = Number(dmap[i]);
+			const nextIdx = Number(dmap[i + 1]);
+			if (!Number.isFinite(delta) || !Number.isFinite(nextIdx)) continue;
+			chatId += delta;
+			map.set(chatId, nextIdx);
+		}
+		return map;
+	}
+
+	window.addEventListener('message', (e) => {
+		const d = e.data;
+		if (!d || d.type !== 'ANIT_BXCS_MAPPING' || !d.bundle) return;
+
+		const bundle = d.bundle;
+		const projects = Array.isArray(bundle.projects) ? bundle.projects : null;
+		const dmapArr = Array.isArray(bundle.dmap) ? bundle.dmap : null;
+		if (!projects || !dmapArr) return;
+
+		window.__anitProjectLookup = {
+			projects,
+			chatToProject: decodeDeltaMap(dmapArr),
+			ts: bundle.ts || Date.now(),
+			portal: bundle.portal || d.host || ''
+		};
+
+		try { if (typeof applyFilters === 'function') applyFilters(); } catch (_) {}
+
+		// аккуратно обновим уже открытую панель (если маппинг пришёл после её построения)
+		try {
+			if (!filtersHost) return;
+			if (!isTasksChatsModeNow()) return;
+
+			const row = filtersHost.querySelector('#anit_projects_row');
+			const hasMapping = !!window.__anitProjectLookup?.projects;
+
+			// если строка была скрыта из-за отсутствия маппинга — пересоберём панель один раз
+			if (row && row.style.display === 'none' && hasMapping) {
+				document.getElementById('anit-filters')?.remove();
+				filtersHost = null;
+				buildFiltersPanel().then(() => applyFilters());
+				return;
+			}
+
+			// иначе просто синхронизируем UI
+			try { uiFromFilters(filtersHost); } catch {}
+		} catch {}
+	}, true);
 
 	try { boot().catch(e => err('fatal', e)); } catch (e) { err('fatal', e); }
 })();

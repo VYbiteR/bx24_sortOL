@@ -1,0 +1,13 @@
+RewriteEngine On
+
+# mapping.php — только при X-ANIT-AGENT: anitBXChatSorter
+RewriteCond %{THE_REQUEST} \s/+mapping\.php[\s?] [NC]
+RewriteCond %{HTTP:X-ANIT-AGENT} !^anitBXChatSorter$ [NC]
+RewriteRule ^mapping\.php - [F,L]
+
+# event endpoint тоже можно ограничить (по отдельному секрету)
+# admin можно закрыть basic-auth, IP allowlist, или заголовком
+
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE application/json
+</IfModule>
