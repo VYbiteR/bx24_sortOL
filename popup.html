@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ANIT Chat Sorter</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 12px 14px;
+      min-width: 260px;
+      font: 13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #1f232b;
+      color: #e9edf1;
+    }
+    h3 { margin: 0 0 10px; font-size: 14px; font-weight: 700; }
+    p { margin: 0 0 10px; color: rgba(255,255,255,.85); }
+    .update { margin-bottom: 12px; padding: 10px; background: rgba(230,168,0,.15); border: 1px solid rgba(230,168,0,.4); border-radius: 8px; }
+    .update-title { font-weight: 600; color: #e6a800; margin-bottom: 6px; }
+    a { color: #6ab0ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .links { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.12); }
+    .links a { display: block; margin-bottom: 6px; }
+    .muted { color: rgba(255,255,255,.55); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="updateBlock" class="update" style="display:none">
+    <div class="update-title">Доступно обновление</div>
+    <p id="updateText"></p>
+    <a id="updateLink" href="#" target="_blank" rel="noopener noreferrer">Скачать с GitHub</a>
+  </div>
+  <div id="currentBlock">
+    <p class="muted" id="currentText">Версия актуальна</p>
+  </div>
+  <div class="links">
+    <a href="#" id="optionsLink">Настройки расширения</a>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,27 +1,19 @@
 {
   "manifest_version": 3,
   "name": "ANIT B24 CHAT SORTER",
-  "version": "1.16.0",
+  "version": "2.0.0",
   "description": "Отключение группировки Открытых линий, фильтры для чатов",
-  "permissions": ["storage"],
-  "host_permissions": ["*://*.bitrix24.ru/*", "<all_urls>"],
-  "options_ui": {
-    "page": "options.html",
-    "open_in_tab": true
-  },
-  "content_scripts": [
-    {
-      "matches": ["*://*.bitrix24.ru/*"],
-      "js": ["content.js"],
-      "run_at": "document_start",
-      "all_frames": true,
-      "match_about_blank": true
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["injected.js"],
-      "matches": ["*://*.bitrix24.ru/*"]
-    }
-  ]
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["*://*.bitrix24.ru/*", "<all_urls>", "https://api.github.com/*"],
+  "options_ui": {"page": "options.html", "open_in_tab": true},
+  "background": {"service_worker": "background.js"},
+  "action": {"default_popup": "popup.html", "default_title": "ANIT B24 CHAT SORTER"},
+  "content_scripts": [{
+    "matches": ["*://*.bitrix24.ru/*"],
+    "js": ["content.js"],
+    "run_at": "document_start",
+    "all_frames": true,
+    "match_about_blank": true
+  }],
+  "web_accessible_resources": [{"resources": ["injected.js"], "matches": ["*://*.bitrix24.ru/*"]}]
 }
