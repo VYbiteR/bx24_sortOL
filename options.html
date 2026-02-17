@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ANIT B24 Chat Sorter — Настройки</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --text: #1f2733;
+      --muted: #6f7b8c;
+      --border: #dce3ee;
+      --border-strong: #c8d3e2;
+      --primary: #2b7fff;
+      --primary-strong: #1766de;
+      --danger: #d64545;
+      --danger-soft: #fff0f0;
+      --ok: #158f4d;
+      --ok-soft: #ecfff4;
+      --info-bg: #eef5ff;
+      --shadow: 0 10px 30px rgba(20, 33, 61, 0.08);
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1040px;
+      margin:0 auto;
+      padding: 28px 16px 36px;
+    }
+    .head h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: .2px;
+    }
+    .head-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .badge-settings {
+      font-size: 12px;
+      color: #3467a8;
+      background: #ebf3ff;
+      border: 1px solid #d2e4ff;
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+    .sub {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius:12px;
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .between { justify-content: space-between; }
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #4a5567;
+      margin: 2px 0 10px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 12px;
+      align-items: start;
+    }
+    .field label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #3a4659;
+    }
+    .input-wrap {
+      position: relative;
+    }
+    input[type="text"], input[type="password"] {
+      width:100%;
+      box-sizing: border-box;
+      background:#fff;
+      color: var(--text);
+      border:1px solid var(--border-strong);
+      border-radius:10px;
+      padding:10px 12px;
+      outline:none;
+      font: inherit;
+    }
+    input[type="text"]:focus, input[type="password"]:focus {
+      border-color: #8fb7ff;
+      box-shadow: 0 0 0 3px rgba(43,127,255,.12);
+    }
+    .field.invalid input {
+      border-color: var(--danger);
+      box-shadow: 0 0 0 3px rgba(214,69,69,.10);
+    }
+    .helper {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .field.invalid .helper {
+      color: var(--danger);
+    }
+    .key-actions {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      display: inline-flex;
+      gap: 6px;
+    }
+    .mini-btn {
+      border: 1px solid var(--border-strong);
+      background: #fff;
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-size: 12px;
+      cursor: pointer;
+      color: #415069;
+    }
+    .active-wrap {
+      min-width: 122px;
+      padding-top: 28px;
+    }
+    .switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #4d5b70;
+    }
+    .switch input { display: none; }
+    .switch-ui {
+      width: 38px;
+      height: 22px;
+      border-radius: 999px;
+      background: #c8d2e2;
+      position: relative;
+      transition: .15s ease;
+    }
+    .switch-ui::after {
+      content: "";
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #fff;
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      transition: .15s ease;
+      box-shadow: 0 1px 3px rgba(0,0,0,.22);
+    }
+    .switch input:checked + .switch-ui {
+      background: #4aa978;
+    }
+    .switch input:checked + .switch-ui::after {
+      left: 19px;
+    }
+    .actions { margin-top: 12px; }
+    button {
+      font: inherit;
+      border:1px solid var(--border-strong);
+      border-radius:10px;
+      padding:9px 12px;
+      cursor:pointer;
+      background: #fff;
+      color: #3d4a5f;
+    }
+    button:hover { border-color: #9fb2cc; }
+    button.primary {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+      font-weight: 600;
+    }
+    button.primary:hover {
+      background: var(--primary-strong);
+      border-color: var(--primary-strong);
+    }
+    button.danger {
+      border-color: #f2c3c3;
+      background: #fff;
+      color: #a73a3a;
+    }
+    .status-line {
+      min-height: 18px;
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .status-line.ok { color: var(--ok); }
+    .status-line.err { color: var(--danger); }
+    .status-line.info { color: var(--primary); }
+    .sync-note {
+      margin-top: 14px;
+      padding: 10px 12px;
+      border: 1px solid #d6e6ff;
+      border-radius: 10px;
+      background: var(--info-bg);
+      color: #3f5370;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    code.badge-code {
+      background: rgba(61, 106, 173, .12);
+      border: 1px solid rgba(61, 106, 173, .24);
+      border-radius: 8px;
+      padding: 2px 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      color: #2d4f80;
+    }
+    .table-head {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: 260px 1fr 110px 210px;
+      align-items: center;
+      gap: 0;
+    }
+    .table-head .section-title { grid-column: 1; }
+    .table-head .help-link { grid-column: 4; justify-self: end; }
+    .tbl {
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      overflow:hidden;
+      border-radius:12px;
+      border:1px solid var(--border);
+      background:#fff;
+      margin-top: 8px;
+    }
+    .tbl th, .tbl td {
+      padding:10px 10px;
+      border-bottom:1px solid #edf1f7;
+      vertical-align:middle;
+    }
+    .tbl th {
+      text-align:left;
+      font-size:12px;
+      color:#728199;
+      background:#f7f9fc;
+    }
+    .tbl tr:hover td { background: #f9fbff; }
+    .tbl tr:last-child td { border-bottom:none; }
+    .badge {
+      font-size:11px;
+      padding:2px 7px;
+      border-radius:999px;
+      border:1px solid #d7e0ee;
+      color:#5d6a7f;
+      background:#f2f6fc;
+    }
+    .badge.ok {
+      border-color: #9bd6b5;
+      color: #0f7243;
+      background: #e9faef;
+    }
+    .row-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      justify-content: flex-start;
+      width: 100%;
+    }
+    .icon-btn {
+      border: 1px solid var(--border-strong);
+      background: #fff;
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 12px;
+      color: #445169;
+      cursor: pointer;
+    }
+    .icon-btn.danger {
+      border-color: #f1cccc;
+      color: #ab3d3d;
+      background: #fff8f8;
+    }
+    .icon-btn.syncing {
+      cursor: wait;
+      opacity: 0.9;
+      pointer-events: none;
+    }
+    .icon-btn.syncing::after {
+      content: "";
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      margin-left: 6px;
+      vertical-align: middle;
+      border: 2px solid var(--border-strong);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: sync-spin 0.7s linear infinite;
+    }
+    @keyframes sync-spin {
+      to { transform: rotate(360deg); }
+    }
+    .empty {
+      padding: 16px 10px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .help-link {
+      color: #2d6fd8;
+      text-decoration: none;
+      font-size: 13px;
+    }
+    .help-link:hover { text-decoration: underline; }
+    .toast {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #cfe1ff;
+      background: #f4f9ff;
+      color: #355378;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(10px);
+      transition: .18s ease;
+      pointer-events: none;
+      z-index: 10000;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .toast.ok {
+      background: var(--ok-soft);
+      border-color: #bfe9d2;
+      color: #146f43;
+    }
+    .toast.err {
+      background: #fff3f3;
+      border-color: #f0c4c4;
+      color: #9f3737;
+    }
+    .modal-wrap {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 38, 0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    .modal-wrap.show { display: flex; }
+    .modal {
+      width: min(460px, calc(100vw - 24px));
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 14px;
+    }
+    .modal h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+    .modal p {
+      margin: 0;
+      color: #62708a;
+      font-size: 13px;
+    }
+    .modal .actions {
+      margin-top: 14px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    @media (max-width: 900px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .active-wrap { padding-top: 0; }
+      .table-head { grid-template-columns: 260px 110px 210px; }
+      .table-head .help-link { grid-column: 3; }
+      .tbl th:nth-child(2), .tbl td:nth-child(2) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <div class="head-row">
+        <h1>ANIT Chat Sorter</h1>
+<!--        <span class="badge-settings">Settings</span>-->
+      </div>
+      <p class="sub">
+<!--        <span aria-hidden="true">i</span>-->
+        <span>Добавьте портал: домен + API-ключ. Если не настроено - расширение работает в режиме без проектов.</span>
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="row between">
+        <div class="section-title">Добавление портала</div>
+        <button id="clearBtn" class="danger" type="button">Очистить все</button>
+      </div>
+
+      <div class="form-grid">
+        <div id="portalField" class="field">
+          <label for="portalHost">Портал</label>
+          <input id="portalHost" type="text" placeholder="например: ****.bitrix24.ru" />
+          <div class="helper" id="portalHint">только домен, без https:// </div>
+        </div>
+        <div id="keyField" class="field">
+          <label for="apiKey">API-ключ</label>
+          <div class="input-wrap">
+            <input id="apiKey" type="password" placeholder="вставьте API-ключ портала" />
+            <div class="key-actions">
+              <button id="toggleKeyBtn" type="button" class="mini-btn" title="Показать/скрыть ключ">👁</button>
+              <button id="copyKeyBtn" type="button" class="mini-btn" title="Копировать ключ">Копировать</button>
+            </div>
+          </div>
+          <div class="helper" id="keyHint">Ключ можно получить в приложения</div>
+        </div>
+        <div class="active-wrap">
+          <label class="switch" for="enabled">
+            <input id="enabled" type="checkbox" checked />
+            <span class="switch-ui"></span>
+            <span>Активен</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="saveBtn" class="primary" type="button">Сохранить</button>
+        <div id="status" class="status-line"></div>
+      </div>
+
+      <div class="sync-note">
+        <span>Автоматическая синхронизация - раз в 2 часа. Ручная - (не чаще, чем раз в 10 минут для портала). Может занять длительное время, не закрывайте страницу.</span>
+      </div>
+
+      <div class="table-head">
+        <div class="section-title" style="margin:0">Настройки порталов</div>
+        <a class="help-link" href="https://anit.bitrix24.ru/online/techhelp" target="_blank" rel="noreferrer">Помощь / обратная связь</a>
+      </div>
+
+      <div>
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width:260px">Портал</th>
+              <th>API ключ</th>
+              <th style="width:110px">Статус</th>
+              <th style="width:210px">Действия</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <div id="modalWrap" class="modal-wrap" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3 id="modalTitle">Подтверждение</h3>
+      <p id="modalText">Вы уверены?</p>
+      <div class="actions">
+        <button id="modalCancel" type="button">Отмена</button>
+        <button id="modalConfirm" class="danger" type="button">Подтвердить</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+  
+</body>
+</html>
