@@ -364,6 +364,9 @@
 	hideSystemMessages: false,
 	projectIndexes: [],
 	responsibleIndexes: [],
+	statusIndexes: [],
+	hiddenProjectIndexes: [],
+	hiddenResponsibleIndexes: [],
 	sortMode: 'native',
 });
 	let filters = loadFilters();
@@ -690,6 +693,24 @@
 		}
 	}
 
+	// status mapping only in "task chats" mode (если расширение поддерживает статусы)
+	if (isTasksChatsModeNow() && window.__anitProjectLookup?.chatToStatus) {
+		const chatId = extractChatIdNumber(el);
+		if (chatId !== null) {
+			const chatToStatus = window.__anitProjectLookup.chatToStatus;
+			const map = chatToStatus instanceof Map ? chatToStatus : new Map(chatToStatus || []);
+			const sIdx = map.get(chatId);
+			if (sIdx !== undefined) {
+				const st = (window.__anitProjectLookup.statuses || [])[sIdx];
+				meta.statusIndex = sIdx;
+				meta.statusName = (st && st[1]) ? st[1] : 'Без статуса';
+			} else {
+				meta.statusIndex = 0;
+				meta.statusName = 'Без статуса';
+			}
+		}
+	}
+
 	return meta;
 }
 
@@ -718,7 +739,6 @@
 	if (filters.unreadOnly && !meta.hasUnread) return false;
 	// Системные сообщения и «Скрыть системные» — только в режиме «Чаты задач»
 	if (isTasksChatsModeNow()) {
-		if (filters.unreadOnly && meta.hasUnread && meta.isSystemUnreadOnly) return false; // в «Непрочитанные» не показывать только если 1 сообщение и оно системное
 		if (filters.hideSystemMessages && meta.isSystemMessage) return false; // скрыть все без стрелочки или аватарки
 	}
 	if (filters.withAttach && !meta.hasAttach) return false;
@@ -740,7 +760,7 @@
 }
 	const q = (filters.query || '').trim().toLowerCase();
 	if (q) {
-	const haystack = [meta.title, meta.lastText, meta.projectName, meta.responsibleName].filter(Boolean).join(' ').toLowerCase();
+	const haystack = [meta.title, meta.lastText, meta.projectName, meta.responsibleName, meta.statusName].filter(Boolean).join(' ').toLowerCase();
 	if (!haystack.includes(q)) return false;
 }
 	// project filter only in "task chats" mode
@@ -758,6 +778,21 @@
 			const ri = (typeof meta.responsibleIndex === 'number') ? meta.responsibleIndex : 0;
 			if (!rSel.includes(ri)) return false;
 		}
+	}
+	// status filter only in "task chats" mode (если расширение поддерживает статусы)
+	if (!IS_OL_FRAME && isTasksChatsModeNow() && window.__anitProjectLookup?.statuses) {
+		const sSel = Array.isArray(filters.statusIndexes) ? filters.statusIndexes : [];
+		if (sSel.length) {
+			const si = (typeof meta.statusIndex === 'number') ? meta.statusIndex : 0;
+			if (!sSel.includes(si)) return false;
+		}
+	}
+	// скрытые проекты и исполнители (только в чатах задач)
+	if (!IS_OL_FRAME && isTasksChatsModeNow()) {
+		const hProj = Array.isArray(filters.hiddenProjectIndexes) ? filters.hiddenProjectIndexes : [];
+		if (hProj.length && typeof meta.projectIndex === 'number' && hProj.includes(meta.projectIndex)) return false;
+		const hResp = Array.isArray(filters.hiddenResponsibleIndexes) ? filters.hiddenResponsibleIndexes : [];
+		if (hResp.length && typeof meta.responsibleIndex === 'number' && hResp.includes(meta.responsibleIndex)) return false;
 	}
 	return true;
 }
@@ -802,6 +837,7 @@
 
 	const POS_LS_KEY = (mode) => `anit.filters.pos.${mode}`; // 'ol' | 'internal'
 	const CAT_COLLAPSED_KEY = 'anit.filters.categories.collapsed';
+	const HIDDEN_COLLAPSED_KEY = 'anit.filters.hidden.collapsed';
 	function getPanelModeKey() {
 		if (IS_OL_FRAME) return 'ol';
 		return isTasksChatsModeNow() ? 'tasks' : 'internal';
@@ -858,6 +894,12 @@
 			if (host.querySelector('#anit_responsible_input')) {
 				try { syncResponsibleInputFromFilters?.(); } catch {}
 			}
+			if (host.querySelector('#anit_status_input')) {
+				try { syncStatusInputFromFilters?.(); } catch {}
+			}
+			if (host.querySelector('#anit_hidden_group')) {
+				try { refreshHiddenChips(host); updateHiddenCounts(host); } catch {}
+			}
 		}
 
 		function filtersFromUI(host){
@@ -882,6 +924,11 @@
 			if (rInp) {
 				const v = String(rInp.value || '').trim();
 				if (v === '') filters.responsibleIndexes = [];
+			}
+			const sInp = host.querySelector('#anit_status_input');
+			if (sInp) {
+				const v = String(sInp.value || '').trim();
+				if (v === '') filters.statusIndexes = [];
 			}
 			if (isTasksChatsModeNow()) filters.sortMode = 'native';
 		}
@@ -1145,6 +1192,9 @@
 #anit-filters #anit_responsibles_row{align-items:center}
 #anit-filters #anit_responsibles_row .muted{flex:0 0 auto}
 #anit-filters #anit_responsibles_row #anit_responsible_suggest{top:34px;left:0;right:0;max-width:100%;box-sizing:border-box}
+#anit-filters #anit_status_row{align-items:center}
+#anit-filters #anit_status_row .muted{flex:0 0 auto}
+#anit-filters #anit_status_row #anit_status_suggest{top:34px;left:0;right:0;max-width:100%;box-sizing:border-box}
 #anit-filters select{padding:3px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff}
 #anit-filters .muted{opacity:.75}
 #anit-filters .actions{display:flex;gap:8px;margin-top:2px;flex-wrap:wrap}
@@ -1165,6 +1215,9 @@
 #anit-filters .category-toggle .chev{width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);transition:transform .15s ease}
 #anit-filters .group.is-collapsed .category-toggle .chev{transform:rotate(-45deg)}
 #anit-filters .group.is-collapsed .group-body{display:none}
+#anit-filters .chip-remove:hover{color:#fff}
+#anit-filters .anit-hidden-row .project-wrap{position:relative}
+#anit-filters #anit_hidden_project_input,#anit-filters #anit_hidden_responsible_input{width:100%;box-sizing:border-box}
 .anit-multi-selected {background: rgba(93, 220, 200, 0.15) !important;}
 .anit-multi-selected::before {content: '✓';position: absolute;left: 6px;top: 50%;transform: translateY(-50%);font-size: 12px;color: #5dc;z-index: 2;}
 .bx-im-list-recent-item__wrap.anit-multi-selected, .bx-messenger-cl-item.anit-multi-selected {position: relative;}
@@ -1277,6 +1330,14 @@
         <div id="anit_responsible_suggest" style="display:none; position:absolute; top:34px; left:0; right:0; max-height:240px; overflow:auto; z-index:10000; background:#1f232b; border:1px solid rgba(255,255,255,.16); border-radius:10px; padding:6px"></div>
       </div>
     </div>` : ``}
+    ${isTasksMode ? `
+    <div class="row" id="anit_status_row" style="display:none; position:relative">
+      <span class="muted">Статус:</span>
+      <div class="project-wrap">
+        <input type="text" id="anit_status_input" placeholder="Все статусы / вводи для поиска">
+        <div id="anit_status_suggest" style="display:none; position:absolute; top:34px; left:0; right:0; max-height:240px; overflow:auto; z-index:10000; background:#1f232b; border:1px solid rgba(255,255,255,.16); border-radius:10px; padding:6px"></div>
+      </div>
+    </div>` : ``}
     </div>
   </div>
   `}
@@ -1287,6 +1348,31 @@
       <input type="text" id="anit_query" placeholder="Поиск по имени/последнему сообщению">
     </div>
   </div>
+
+  ${!IS_OL_FRAME && isTasksMode ? `
+  <div class="group" id="anit_hidden_group">
+    <div class="group-head">
+      <div class="group-title">Скрытые</div>
+      <button type="button" id="anit_hidden_toggle" class="category-toggle" title="Свернуть/развернуть"><span class="chev"></span></button>
+    </div>
+    <div class="group-body">
+      <div class="row"><span class="muted">Скрыть проекты:</span> <span id="anit_hidden_projects_count" class="muted anit-hidden-count"></span></div>
+      <div class="row anit-hidden-row">
+        <div class="project-wrap" style="width:100%">
+          <input type="text" id="anit_hidden_project_input" placeholder="Проекты / вводи для поиска">
+          <div id="anit_hidden_project_suggest" style="display:none; position:absolute; top:100%; left:0; right:0; max-height:200px; overflow:auto; z-index:10000; background:#1f232b; border:1px solid rgba(255,255,255,.16); border-radius:10px; padding:6px; margin-top:2px"></div>
+        </div>
+      </div>
+      <div class="row"><span class="muted">Скрыть исполнителей:</span> <span id="anit_hidden_responsibles_count" class="muted anit-hidden-count"></span></div>
+      <div class="row anit-hidden-row">
+        <div class="project-wrap" style="width:100%">
+          <input type="text" id="anit_hidden_responsible_input" placeholder="Исполнители / вводи для поиска">
+          <div id="anit_hidden_responsible_suggest" style="display:none; position:absolute; top:100%; left:0; right:0; max-height:200px; overflow:auto; z-index:10000; background:#1f232b; border:1px solid rgba(255,255,255,.16); border-radius:10px; padding:6px; margin-top:2px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  ` : ''}
 
   <div class="group">
     <div class="group-title">Действия</div>
@@ -1619,6 +1705,267 @@
 			box.style.display = 'block';
 		}
 
+		function closeHiddenProjectSuggest() {
+			const box = host.querySelector('#anit_hidden_project_suggest');
+			if (box) box.style.display = 'none';
+		}
+		function closeHiddenResponsibleSuggest() {
+			const box = host.querySelector('#anit_hidden_responsible_suggest');
+			if (box) box.style.display = 'none';
+		}
+		function refreshHiddenChips(h) { /* чипсы убраны, оставлено для совместимости вызовов */ }
+		function updateHiddenCounts(h) {
+			const root = h || host;
+			const projEl = root.querySelector('#anit_hidden_projects_count');
+			const respEl = root.querySelector('#anit_hidden_responsibles_count');
+			if (projEl) {
+				const n = Array.isArray(filters.hiddenProjectIndexes) ? filters.hiddenProjectIndexes.length : 0;
+				projEl.textContent = n > 0 ? '(' + n + ')' : '';
+			}
+			if (respEl) {
+				const n = Array.isArray(filters.hiddenResponsibleIndexes) ? filters.hiddenResponsibleIndexes.length : 0;
+				respEl.textContent = n > 0 ? '(' + n + ')' : '';
+			}
+		}
+		function renderHiddenProjectSuggest(qRaw) {
+			const box = host.querySelector('#anit_hidden_project_suggest');
+			if (!box) return;
+			const projects = getProjectsSafe();
+			const usedIndexes = getUsedProjectIndexes();
+			const hiddenSet = new Set(Array.isArray(filters.hiddenProjectIndexes) ? filters.hiddenProjectIndexes : []);
+			const q = String(qRaw || '').trim().toLowerCase();
+			let hasNoProjectTasks = false;
+			if (projects) {
+				for (let i = 0; i < projects.length; i++) {
+					const p = projects[i];
+					const name = (p && p[1]) ? String(p[1]) : '';
+					if (name.trim().toLowerCase() === 'без проекта' && usedIndexes.has(i)) { hasNoProjectTasks = true; break; }
+				}
+			}
+			const items = [];
+			if (hasNoProjectTasks && (!q || 'без проекта'.includes(q) || 'без'.includes(q))) items.push({ idx: -1, label: 'Без проекта' });
+			if (projects) {
+				for (let i = 0; i < projects.length; i++) {
+					if (!usedIndexes.has(i)) continue;
+					const p = projects[i];
+					const name = (p && p[1]) ? String(p[1]) : '';
+					if (!name || name.trim().toLowerCase() === 'без проекта') continue;
+					if (q && !name.toLowerCase().includes(q)) continue;
+					items.push({ idx: i, label: name });
+				}
+			}
+			box.innerHTML = '';
+			if (!items.length) {
+				box.innerHTML = '<div class="muted">Нет проектов</div>';
+				box.style.display = 'block';
+				return;
+			}
+			for (const it of items.slice(0, 100)) {
+				const row = document.createElement('label');
+				row.style.cssText = 'display:flex;align-items:center;gap:8px;margin:2px 0;padding:6px 8px;cursor:pointer;color:#dce4ef';
+				const cb = document.createElement('input');
+				cb.type = 'checkbox';
+				cb.checked = hiddenSet.has(it.idx);
+				cb.style.accentColor = '#5dc';
+				const span = document.createElement('span');
+				span.textContent = it.label;
+				row.appendChild(cb);
+				row.appendChild(span);
+				const toggle = () => {
+					if (!filters.hiddenProjectIndexes) filters.hiddenProjectIndexes = [];
+					const arr = filters.hiddenProjectIndexes;
+					const i = arr.indexOf(it.idx);
+					if (i >= 0) arr.splice(i, 1);
+					else arr.push(it.idx);
+					saveFilters();
+					applyFilters();
+					updateHiddenCounts(host);
+					renderHiddenProjectSuggest(host.querySelector('#anit_hidden_project_input')?.value || '');
+				};
+				cb.addEventListener('change', toggle);
+				row.addEventListener('click', (e) => { if (e.target !== cb) { e.preventDefault(); toggle(); } });
+				box.appendChild(row);
+			}
+			box.style.display = 'block';
+		}
+		function renderHiddenResponsibleSuggest(qRaw) {
+			const box = host.querySelector('#anit_hidden_responsible_suggest');
+			if (!box) return;
+			const users = getUsersSafe();
+			const usedIndexes = getUsedResponsibleIndexes();
+			const hiddenSet = new Set(Array.isArray(filters.hiddenResponsibleIndexes) ? filters.hiddenResponsibleIndexes : []);
+			const q = String(qRaw || '').trim().toLowerCase();
+			let noIdx = -1, hasNoResponsible = false;
+			if (users) {
+				for (let i = 0; i < users.length; i++) {
+					const u = users[i];
+					if ((u && u[0]) === 0) { noIdx = i; break; }
+				}
+				if (noIdx >= 0 && usedIndexes.has(noIdx)) hasNoResponsible = true;
+			}
+			const items = [];
+			if (hasNoResponsible && (!q || 'без исполнителя'.includes(q) || 'без'.includes(q))) items.push({ idx: noIdx, label: 'Без исполнителя' });
+			if (users) {
+				for (let i = 0; i < users.length; i++) {
+					if (!usedIndexes.has(i)) continue;
+					const u = users[i];
+					if ((u && u[0]) === 0) continue;
+					const label = (u && u[1]) ? String(u[1]) : '';
+					if (!label) continue;
+					if (q && !label.toLowerCase().includes(q)) continue;
+					items.push({ idx: i, label });
+				}
+			}
+			box.innerHTML = '';
+			if (!items.length) {
+				box.innerHTML = '<div class="muted">Нет исполнителей</div>';
+				box.style.display = 'block';
+				return;
+			}
+			for (const it of items.slice(0, 100)) {
+				const row = document.createElement('label');
+				row.style.cssText = 'display:flex;align-items:center;gap:8px;margin:2px 0;padding:6px 8px;cursor:pointer;color:#dce4ef';
+				const cb = document.createElement('input');
+				cb.type = 'checkbox';
+				cb.checked = hiddenSet.has(it.idx);
+				cb.style.accentColor = '#5dc';
+				const span = document.createElement('span');
+				span.textContent = it.label;
+				row.appendChild(cb);
+				row.appendChild(span);
+				const toggle = () => {
+					if (!filters.hiddenResponsibleIndexes) filters.hiddenResponsibleIndexes = [];
+					const arr = filters.hiddenResponsibleIndexes;
+					const i = arr.indexOf(it.idx);
+					if (i >= 0) arr.splice(i, 1);
+					else arr.push(it.idx);
+					saveFilters();
+					applyFilters();
+					updateHiddenCounts(host);
+					renderHiddenResponsibleSuggest(host.querySelector('#anit_hidden_responsible_input')?.value || '');
+				};
+				cb.addEventListener('change', toggle);
+				row.addEventListener('click', (e) => { if (e.target !== cb) { e.preventDefault(); toggle(); } });
+				box.appendChild(row);
+			}
+			box.style.display = 'block';
+		}
+
+		function getStatusesSafe() {
+			const s = window.__anitProjectLookup?.statuses;
+			return Array.isArray(s) ? s : null;
+		}
+
+		function getUsedStatusIndexes() {
+			const chatToStatus = window.__anitProjectLookup?.chatToStatus;
+			const map = chatToStatus instanceof Map ? chatToStatus : new Map(chatToStatus || []);
+			const used = new Set();
+			for (const idx of map.values()) {
+				const n = Number(idx);
+				if (Number.isFinite(n) && n >= 0) used.add(n);
+			}
+			return used;
+		}
+
+		function getSelectedStatusIndexes() {
+			const arr = Array.isArray(filters.statusIndexes) ? filters.statusIndexes : [];
+			return arr.filter(n => Number.isFinite(n));
+		}
+
+		function setSelectedStatusIndex(v) {
+			if (v === '' || v === null || v === undefined) {
+				filters.statusIndexes = [];
+				return;
+			}
+			const n = parseInt(String(v), 10);
+			filters.statusIndexes = Number.isFinite(n) ? [n] : [];
+		}
+
+		function getStatusLabelByIndex(idx) {
+			const statuses = getStatusesSafe();
+			if (!statuses) return '';
+			const st = statuses[idx];
+			return (st && st[1]) ? String(st[1]) : '';
+		}
+
+		function syncStatusInputFromFilters() {
+			const inp = host.querySelector('#anit_status_input');
+			if (!inp) return;
+			const chosen = getSelectedStatusIndexes();
+			if (!chosen.length) { inp.value = ''; return; }
+			inp.value = getStatusLabelByIndex(chosen[0]) || '';
+		}
+
+		function closeStatusSuggest() {
+			const box = host.querySelector('#anit_status_suggest');
+			if (box) box.style.display = 'none';
+		}
+
+		function renderStatusSuggest(qRaw = '') {
+			const box = host.querySelector('#anit_status_suggest');
+			if (!box) return;
+			const statuses = getStatusesSafe();
+			const usedIndexes = getUsedStatusIndexes();
+			const q = String(qRaw || '').trim().toLowerCase();
+
+			let noIdx = -1;
+			let hasNoStatus = false;
+			if (statuses) {
+				for (let i = 0; i < statuses.length; i++) {
+					const st = statuses[i];
+					const sid = (st && st[0]) ? Number(st[0]) : 0;
+					if (sid === 0) { noIdx = i; break; }
+				}
+				if (noIdx >= 0 && usedIndexes.has(noIdx)) hasNoStatus = true;
+			}
+
+			const items = [];
+			if (!q || 'все'.includes(q)) items.push({ idx: '', label: 'Все статусы' });
+			if (hasNoStatus && (!q || 'без статуса'.includes(q) || 'без'.includes(q))) {
+				items.push({ idx: noIdx, label: 'Без статуса' });
+			}
+			if (statuses) {
+				for (let i = 0; i < statuses.length; i++) {
+					if (!usedIndexes.has(i)) continue;
+					const st = statuses[i];
+					const sid = (st && st[0]) ? Number(st[0]) : 0;
+					const label = (st && st[1]) ? String(st[1]) : '';
+					if (!label) continue;
+					if (sid === 0) continue;
+					if (q && !label.toLowerCase().includes(q)) continue;
+					items.push({ idx: i, label });
+				}
+			}
+
+			box.innerHTML = '';
+			if (!items.length) {
+				box.innerHTML = '<div class="muted">Ничего не найдено</div>';
+				box.style.display = 'block';
+				return;
+			}
+
+			for (const it of items.slice(0, 100)) {
+				const row = document.createElement('button');
+				row.type = 'button';
+				row.textContent = it.label;
+				row.style.display = 'block';
+				row.style.width = '100%';
+				row.style.textAlign = 'left';
+				row.style.margin = '2px 0';
+				row.style.padding = '6px 8px';
+				row.addEventListener('click', (e) => {
+					e.preventDefault();
+					setSelectedStatusIndex(it.idx);
+					syncStatusInputFromFilters();
+					closeStatusSuggest();
+					saveFilters();
+					applyFilters();
+				});
+				box.appendChild(row);
+			}
+			box.style.display = 'block';
+		}
+
 		(function initProjectPicker() {
 			const row = host.querySelector('#anit_projects_row');
 			if (!row) return;
@@ -1660,6 +2007,12 @@
 				const rInp = host.querySelector('#anit_responsible_input');
 				const rWrap = rInp?.parentElement;
 				if (rWrap && !rWrap.contains(e.target)) closeResponsibleSuggest();
+				const sWrap = host.querySelector('#anit_status_row')?.querySelector('.project-wrap');
+				if (sWrap && !sWrap.contains(e.target)) closeStatusSuggest();
+				const projectSuggestBox = host.querySelector('#anit_hidden_project_suggest');
+				const responsibleSuggestBox = host.querySelector('#anit_hidden_responsible_suggest');
+				if (projectSuggestBox && !projectSuggestBox.contains(e.target)) closeHiddenProjectSuggest();
+				if (responsibleSuggestBox && !responsibleSuggestBox.contains(e.target)) closeHiddenResponsibleSuggest();
 			}, true);
 		})();
 
@@ -1697,6 +2050,61 @@
 				inp.addEventListener('keydown', (e) => {
 					if (e.key === 'Escape') closeResponsibleSuggest();
 				});
+			}
+		})();
+
+		(function initStatusPicker() {
+			const row = host.querySelector('#anit_status_row');
+			if (!row) return;
+			if (!isTasksChatsModeNow()) {
+				row.style.display = 'none';
+				return;
+			}
+			const hasStatuses = Array.isArray(window.__anitProjectLookup?.statuses) && window.__anitProjectLookup.statuses.length > 0;
+			if (!hasStatuses) {
+				row.style.display = 'none';
+				return;
+			}
+			if (Array.isArray(filters.statusIndexes) && filters.statusIndexes.length) {
+				filters.statusIndexes = [];
+				saveFilters();
+			}
+			row.style.display = 'flex';
+			syncStatusInputFromFilters();
+			const inp = host.querySelector('#anit_status_input');
+			if (inp) {
+				inp.addEventListener('focus', () => renderStatusSuggest(inp.value || ''));
+				inp.addEventListener('input', () => {
+					renderStatusSuggest(inp.value || '');
+					const v = String(inp.value || '').trim();
+					if (v === '') {
+						setSelectedStatusIndex('');
+						saveFilters();
+						applyFilters();
+					}
+				});
+				inp.addEventListener('keydown', (e) => {
+					if (e.key === 'Escape') closeStatusSuggest();
+				});
+			}
+		})();
+
+		(function initHiddenSection() {
+			const hiddenGroup = host.querySelector('#anit_hidden_group');
+			if (!hiddenGroup) return;
+			refreshHiddenChips(host);
+			updateHiddenCounts(host);
+			const hpInp = host.querySelector('#anit_hidden_project_input');
+			if (hpInp) {
+				hpInp.addEventListener('focus', () => renderHiddenProjectSuggest(hpInp.value || ''));
+				hpInp.addEventListener('input', () => renderHiddenProjectSuggest(hpInp.value || ''));
+				hpInp.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHiddenProjectSuggest(); });
+			}
+			const hrInp = host.querySelector('#anit_hidden_responsible_input');
+			if (hrInp) {
+				hrInp.addEventListener('focus', () => renderHiddenResponsibleSuggest(hrInp.value || ''));
+				hrInp.addEventListener('input', () => renderHiddenResponsibleSuggest(hrInp.value || ''));
+				hrInp.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeHiddenResponsibleSuggest(); });
 			}
 		})();
 
@@ -1801,21 +2209,31 @@
 			filters.projectIndexes = chosen.filter(n => Number.isFinite(n)).slice(0, 1);
 		}
 	}
-	const rInp = host.querySelector('#anit_responsible_input');
-	if (rInp) {
-		const v = String(rInp.value || '').trim();
-		if (v === '') {
-			filters.responsibleIndexes = [];
-		} else {
-			// если вручную введено значение, но не выбрано из списка — не меняем текущее состояние
-			const chosen = Array.isArray(filters.responsibleIndexes) ? filters.responsibleIndexes : [];
-			filters.responsibleIndexes = chosen.filter(n => Number.isFinite(n)).slice(0, 1);
-		}
+			const rInp = host.querySelector('#anit_responsible_input');
+			if (rInp) {
+				const v = String(rInp.value || '').trim();
+				if (v === '') {
+					filters.responsibleIndexes = [];
+				} else {
+					// если вручную введено значение, но не выбрано из списка — не меняем текущее состояние
+					const chosen = Array.isArray(filters.responsibleIndexes) ? filters.responsibleIndexes : [];
+					filters.responsibleIndexes = chosen.filter(n => Number.isFinite(n)).slice(0, 1);
+				}
+			}
+			const sInp = host.querySelector('#anit_status_input');
+			if (sInp) {
+				const v = String(sInp.value || '').trim();
+				if (v === '') {
+					filters.statusIndexes = [];
+				} else {
+					const chosen = Array.isArray(filters.statusIndexes) ? filters.statusIndexes : [];
+					filters.statusIndexes = chosen.filter(n => Number.isFinite(n)).slice(0, 1);
+				}
+			}
+			if (isTasksChatsModeNow()) filters.sortMode = 'native';
+			saveFilters();
+			applyFilters();
 	}
-	if (isTasksChatsModeNow()) filters.sortMode = 'native';
-	saveFilters();
-	applyFilters();
-}
 
 	host.querySelector('#anit_apply').addEventListener('click', readAndApply);
 	host.querySelector('#anit_reset').addEventListener('click', () => {
@@ -1841,6 +2259,9 @@
 	if (pInpReset) pInpReset.value = '';
 	const rInpReset = host.querySelector('#anit_responsible_input');
 	if (rInpReset) rInpReset.value = '';
+	const sInpReset = host.querySelector('#anit_status_input');
+	if (sInpReset) sInpReset.value = '';
+	if (host.querySelector('#anit_hidden_group')) { try { refreshHiddenChips(host); updateHiddenCounts(host); } catch {} }
 	filters.sortMode = 'native';
 	applyFilters();
 });
@@ -1937,6 +2358,20 @@
 				e.preventDefault();
 				const next = !categoriesGroup.classList.contains('is-collapsed');
 				applyCategoryCollapsed(next);
+			});
+		}
+
+		const hiddenGroup = host.querySelector('#anit_hidden_group');
+		const hiddenToggle = host.querySelector('#anit_hidden_toggle');
+		if (hiddenGroup && hiddenToggle && isTasksMode) {
+			const applyHiddenCollapsed = (collapsed) => {
+				hiddenGroup.classList.toggle('is-collapsed', !!collapsed);
+				try { localStorage.setItem(HIDDEN_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch {}
+			};
+			try { applyHiddenCollapsed(localStorage.getItem(HIDDEN_COLLAPSED_KEY) === '1'); } catch {}
+			hiddenToggle.addEventListener('click', (e) => {
+				e.preventDefault();
+				applyHiddenCollapsed(!hiddenGroup.classList.contains('is-collapsed'));
 			});
 		}
 
@@ -2204,7 +2639,9 @@
 				projects: Array.isArray(e.data.projects) ? e.data.projects : (window.__anitProjectLookup?.projects || []),
 				chatToProject: new Map(Array.isArray(e.data.chatToProject) ? e.data.chatToProject : (window.__anitProjectLookup?.chatToProject || [])),
 				users: Array.isArray(e.data.users) ? e.data.users : (window.__anitProjectLookup?.users || []),
-				chatToResponsible: new Map(Array.isArray(e.data.chatToResponsible) ? e.data.chatToResponsible : (window.__anitProjectLookup?.chatToResponsible || []))
+				chatToResponsible: new Map(Array.isArray(e.data.chatToResponsible) ? e.data.chatToResponsible : (window.__anitProjectLookup?.chatToResponsible || [])),
+				statuses: Array.isArray(e.data.statuses) ? e.data.statuses : (window.__anitProjectLookup?.statuses || []),
+				chatToStatus: new Map(Array.isArray(e.data.chatToStatus) ? e.data.chatToStatus : (window.__anitProjectLookup?.chatToStatus || []))
 			};
 			try { applyFilters(); } catch (err) {}
 			try {
@@ -2249,12 +2686,16 @@
 		if (!projects || !dmapArr) return;
 		const users = Array.isArray(bundle.users) ? bundle.users : null;
 		const dmapUArr = Array.isArray(bundle.dmapu) ? bundle.dmapu : null;
+		const statuses = Array.isArray(bundle.statuses) ? bundle.statuses : null;
+		const dmapStatusArr = Array.isArray(bundle.dmapStatus) ? bundle.dmapStatus : null;
 
 		window.__anitProjectLookup = {
 			projects,
 			chatToProject: decodeDeltaMap(dmapArr),
 			users: users || [],
 			chatToResponsible: decodeDeltaMap(dmapUArr),
+			statuses: statuses || [],
+			chatToStatus: decodeDeltaMap(dmapStatusArr),
 			ts: bundle.ts || Date.now(),
 			portal: bundle.portal || d.host || ''
 		};
