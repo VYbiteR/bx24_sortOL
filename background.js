@@ -1,9 +1,72 @@
 (function () {
   const GITHUB_LATEST = 'https://api.github.com/repos/VYbiteR/bx24_sortOL/releases/latest';
   const STORAGE_KEY = 'anit_update_info';
+  const DYNAMIC_CS_ID_PREFIX = 'anit-cs-';
+  const BITRIX24_RU_RE = /^[a-z0-9.-]+\.bitrix24\.ru$/i;
 
+  function isCustomHost(host) {
+    const h = String(host || '').trim().toLowerCase();
+    if (!h) return false;
+    return !BITRIX24_RU_RE.test(h);
+  }
 
-  chrome.runtime.onMessage.addListener((msg, sender, _sendResponse) => {
+  function hostToScriptId(host) {
+    return DYNAMIC_CS_ID_PREFIX + host.replace(/[^a-z0-9.-]/gi, '_').toLowerCase();
+  }
+
+  function getCustomHostOrigins(host) {
+    const h = host.replace(/^https?:\/\//, '').split('/')[0].toLowerCase();
+    return ['https://' + h + '/*', 'http://' + h + '/*'];
+  }
+
+  function syncContentScriptsForPortals(portals) {
+    if (!chrome.scripting || !chrome.scripting.getRegisteredContentScripts) return Promise.resolve();
+    const customHosts = Object.keys(portals || {}).filter(isCustomHost);
+    return chrome.scripting.getRegisteredContentScripts()
+      .then((registered) => {
+        const our = (registered || []).filter((r) => r.id && r.id.startsWith(DYNAMIC_CS_ID_PREFIX));
+        const toRemove = our.filter((r) => !customHosts.some((h) => hostToScriptId(h) === r.id));
+        const toAdd = customHosts.filter((h) => !our.some((r) => r.id === hostToScriptId(h)));
+        let p = Promise.resolve();
+        toRemove.forEach((r) => {
+          p = p.then(() => chrome.scripting.unregisterContentScripts({ ids: [r.id] }).catch(() => {}));
+        });
+        toAdd.forEach((host) => {
+          const id = hostToScriptId(host);
+          const origins = getCustomHostOrigins(host);
+          p = p.then(() =>
+            chrome.scripting.registerContentScripts([{
+              id,
+              matches: origins,
+              js: ['content.js'],
+              runAt: 'document_start',
+              allFrames: true,
+              matchAboutBlank: true,
+            }]).catch(() => {})
+          );
+        });
+        return p;
+      })
+      .catch(() => {});
+  }
+
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg?.type === 'ANIT_SYNC_CONTENT_SCRIPTS') {
+      chrome.storage.sync.get(['portals'], (res) => {
+        syncContentScriptsForPortals(res?.portals || {}).then(() => sendResponse?.({ ok: true }));
+      });
+      return true;
+    }
+    if (msg?.type === 'ANIT_REGISTER_HOST' && msg.host) {
+      const host = String(msg.host).trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+      if (!host) { sendResponse?.({ ok: false }); return true; }
+      chrome.storage.sync.get(['portals'], (res) => {
+        const portals = res?.portals || {};
+        if (!portals[host]) { sendResponse?.({ ok: false }); return; }
+        syncContentScriptsForPortals(portals).then(() => sendResponse?.({ ok: true }));
+      });
+      return true;
+    }
     if (msg?.type !== 'ANIT_BXCS_OPEN_OPTIONS') return;
     const url = chrome.runtime.getURL('options.html');
     try {
@@ -85,10 +148,22 @@
 
   chrome.runtime.onInstalled.addListener(() => {
     checkVersion();
+    chrome.storage.sync.get(['portals'], (res) => {
+      syncContentScriptsForPortals(res?.portals || {}).catch(() => {});
+    });
   });
 
   chrome.runtime.onStartup.addListener(() => {
     checkVersion();
+    chrome.storage.sync.get(['portals'], (res) => {
+      syncContentScriptsForPortals(res?.portals || {}).catch(() => {});
+    });
+  });
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'sync' || !changes.portals) return;
+    const portals = changes.portals?.newValue ?? {};
+    syncContentScriptsForPortals(portals).catch(() => {});
   });
 
   checkVersion();

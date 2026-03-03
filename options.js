@@ -24,6 +24,28 @@ function isValidHost(host) {
   return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(host);
 }
 
+function isCustomHost(host) {
+  const h = String(host || '').trim().toLowerCase();
+  if (!h) return false;
+  return !/^[a-z0-9.-]+\.bitrix24\.ru$/i.test(h);
+}
+
+function requestHostPermissionAndSync(host) {
+  if (!isCustomHost(host)) {
+    return Promise.resolve(true);
+  }
+  const origins = ['https://' + host + '/*', 'http://' + host + '/*'];
+  if (!chrome.permissions || !chrome.permissions.request) {
+    return chrome.runtime.sendMessage({ type: 'ANIT_SYNC_CONTENT_SCRIPTS' }).then(() => true);
+  }
+  return chrome.permissions.request({ origins }).then(
+    (granted) => {
+      return chrome.runtime.sendMessage({ type: 'ANIT_SYNC_CONTENT_SCRIPTS' }).then(() => granted);
+    },
+    () => chrome.runtime.sendMessage({ type: 'ANIT_SYNC_CONTENT_SCRIPTS' }).then(() => false)
+  );
+}
+
 function maskKey(key) {
   const s = String(key || "");
   if (!s) return "—";
@@ -265,9 +287,20 @@ $("saveBtn")?.addEventListener("click", async () => {
   clearValidationHints();
 
   await render();
-  const msg = existed ? "Портал обновлен" : "Портал добавлен";
+  let msg = existed ? "Портал обновлен" : "Портал добавлен";
+  if (isCustomHost(host)) {
+    try {
+      const granted = await requestHostPermissionAndSync(host);
+      if (!granted) {
+        msg += ". Разрешите доступ к домену для работы расширения на этой странице.";
+        showToast("Разрешите доступ к " + host + " в диалоге расширения", "err", 5000);
+      }
+    } catch (e) {
+      msg += ". Если расширение не работает на этом домене — откройте настройки и сохраните портал ещё раз.";
+    }
+  }
   setStatus(msg, "ok");
-  showToast(msg, "ok");
+  showToast(existed ? "Портал обновлен" : "Портал добавлен", "ok");
 });
 
 $("clearBtn")?.addEventListener("click", async () => {
@@ -298,4 +331,12 @@ $("modalWrap")?.addEventListener("click", (e) => {
 $("portalHost")?.addEventListener("input", () => setFieldError("portalField", "portalHint", ""));
 $("apiKey")?.addEventListener("input", () => setFieldError("keyField", "keyHint", ""));
 
-if ($("rows")) render();
+if ($("rows")) {
+  render();
+  loadPortals().then((portals) => {
+    const hasCustom = Object.keys(portals || {}).some(isCustomHost);
+    if (hasCustom && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({ type: "ANIT_SYNC_CONTENT_SCRIPTS" }).catch(() => {});
+    }
+  });
+}

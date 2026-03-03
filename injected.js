@@ -3,9 +3,9 @@
 	(function () {
 
 	if (window.__ANITREC_RUNNING__) { return; }
-	window.__ANITREC_RUNNING__ = '1.16.0';
+	window.__ANITREC_RUNNING__ = '2.0.2';
 
-	const VER = '1.16.0';
+	const VER = '2.0.2';
 	const TAG = 'ANIT: CHAT SORTER';
 	const LBL = `%c[${TAG}]`;
 	const CSS_LOG  = 'background:#000;color:#fff;padding:1px 4px;border-radius:3px';
@@ -1154,9 +1154,14 @@
 #anit-filters .opts-field input{width:90%}
 #anit-filters .opts-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 #anit-filters .opts-status{margin-top:6px;min-height:14px}
+#anit-filters .opts-key-warn{margin-top:6px;color:#ffd772;font-size:11px;line-height:1.35;display:none}
+#anit-filters .opts-key-warn.show{display:block}
 #anit-filters .brand{display:flex;align-items:center;gap:8px;min-width:0}
 #anit-filters .brand-icon{width:20px;height:20px;display:inline-flex;flex:0 0 20px}
+#anit-filters .brand-top{display:flex;align-items:center;gap:8px;min-width:0}
 #anit-filters .brand-title{font-size:12px;font-weight:700;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#anit-filters .brand-update-link{font-size:11px;color:#ffd772;text-decoration:underline;text-decoration-color:rgba(255,215,114,.6);display:none;white-space:nowrap}
+#anit-filters .brand-update-link.show{display:inline}
 #anit-filters .brand-sub{font-size:11px;opacity:.75}
 #anit-filters .group{margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1)}
 #anit-filters .group-title{font-size:11px;font-weight:700;letter-spacing:.2px;text-transform:uppercase;opacity:.78;margin:0 0 6px 0}
@@ -1233,7 +1238,10 @@
         </svg>
       </span>
       <div>
-        <div class="brand-title">ANIT Chat Sorter</div>
+        <div class="brand-top">
+          <div class="brand-title">ANIT Chat Sorter</div>
+          <a id="anit_update_link" class="brand-update-link" href="#" target="_blank" rel="noopener noreferrer">Доступно обновление</a>
+        </div>
         <div class="brand-sub">${IS_OL_FRAME ? 'Контакт-центр' : (isTasksMode ? 'Чаты задач' : 'Чаты')}</div>
       </div>
     </div>
@@ -1259,6 +1267,7 @@
           <button type="button" id="anit_opts_full" class="btn-tertiary" title="Пробуем открыть options.html (может быть недоступно в desktop-клиенте)">Открыть страницу настроек</button>
         </div>
         <div class="opts-status muted" id="anit_opts_status"></div>
+        <div class="opts-key-warn" id="anit_opts_key_warn">Возможно, API-ключ для этого портала неактуален: 3 ошибки загрузки маппинга подряд.</div>
       </div>
     </div>
   </div>
@@ -1402,13 +1411,29 @@
 		const pop = host.querySelector('#anit_opts_pop');
 		const hostEl = host.querySelector('#anit_opts_host');
 		const keyEl = host.querySelector('#anit_opts_key');
+		const keyWarnEl = host.querySelector('#anit_opts_key_warn');
+		const updateLinkEl = host.querySelector('#anit_update_link');
 		const saveBtn = host.querySelector('#anit_opts_save');
 		const closeBtn = host.querySelector('#anit_opts_close');
 		const fullBtn = host.querySelector('#anit_opts_full');
 		const statusEl = host.querySelector('#anit_opts_status');
 		const genId = () => `anit_${Math.random().toString(36).slice(2)}_${Date.now()}`;
 		let reqCfgId = null;
+		let reqHealthId = null;
+		let reqUpdateId = null;
 		let saveCfgId = null;
+		let latestHealth = { failCount: 0 };
+
+		const renderKeyWarning = (health) => {
+			const failCount = Number(health?.failCount || 0);
+			latestHealth = { failCount };
+			if (!keyWarnEl) return;
+			if (failCount >= 3) {
+				keyWarnEl.classList.add('show');
+				return;
+			}
+			keyWarnEl.classList.remove('show');
+		};
 
 		const setStatus = (t) => { if (statusEl) statusEl.textContent = String(t || ''); };
 		const showPop = () => {
@@ -1417,7 +1442,9 @@
 			if (hostEl) hostEl.textContent = portalHost ? portalHost : '—';
 			setStatus('Загрузка…');
 			reqCfgId = genId();
+			reqHealthId = genId();
 			try { window.postMessage({ type: 'ANIT_BXCS_GET_PORTAL_CFG', requestId: reqCfgId, host: portalHost }, '*'); } catch {}
+			try { window.postMessage({ type: 'ANIT_BXCS_GET_PORTAL_HEALTH', requestId: reqHealthId, host: portalHost }, '*'); } catch {}
 		};
 		const hidePop = () => { if (pop) pop.classList.remove('show'); };
 		const togglePop = () => { if (!pop) return; pop.classList.contains('show') ? hidePop() : showPop(); };
@@ -1444,6 +1471,8 @@
 			saveCfgId = genId();
 			try { window.postMessage({ type: 'ANIT_BXCS_SET_PORTAL_CFG', requestId: saveCfgId, host: portalHost, cfg: { enabled, apiKey } }, '*'); } catch {}
 		});
+		reqUpdateId = genId();
+		try { window.postMessage({ type: 'ANIT_BXCS_GET_UPDATE_INFO', requestId: reqUpdateId, host: portalHost }, '*'); } catch {}
 
 		// Закрытие по клику вне окна / Esc
 		document.addEventListener('click', (e) => {
@@ -1466,9 +1495,27 @@
 				if (keyEl) keyEl.value = String(cfg.apiKey || '');
 				setStatus('');
 			}
+			if (d.type === 'ANIT_BXCS_PORTAL_HEALTH' && d.requestId && d.requestId === reqHealthId) {
+				renderKeyWarning(d.health || { failCount: 0 });
+			}
+			if (d.type === 'ANIT_BXCS_MAPPING_HEALTH' && d.host === portalHost) {
+				renderKeyWarning(d.health || { failCount: 0 });
+			}
 			if (d.type === 'ANIT_BXCS_PORTAL_CFG_SAVED' && d.requestId && d.requestId === saveCfgId) {
 				setStatus(d.ok ? 'Сохранено' : 'Ошибка сохранения');
+				if (d.ok && latestHealth.failCount >= 3) {
+					setStatus('Сохранено. Если предупреждение осталось — проверьте новый ключ.');
+				}
 				if (d.ok) setTimeout(() => { if (pop?.classList.contains('show')) setStatus(''); }, 1200);
+			}
+			if (d.type === 'ANIT_BXCS_UPDATE_INFO' && d.requestId && d.requestId === reqUpdateId) {
+				const upd = d.update || null;
+				if (upd && upd.hasUpdate && upd.url) {
+					if (updateLinkEl) {
+						updateLinkEl.href = String(upd.url);
+						updateLinkEl.classList.add('show');
+					}
+				}
 			}
 		}, true);
 	}

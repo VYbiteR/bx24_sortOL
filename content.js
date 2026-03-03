@@ -68,6 +68,24 @@
       return;
     }
 
+    if (d.type === 'ANIT_BXCS_GET_PORTAL_HEALTH') {
+      const health = await loadMappingHealth(host);
+      postToPage({ type: 'ANIT_BXCS_PORTAL_HEALTH', requestId: reqId, host, health });
+      return;
+    }
+
+    if (d.type === 'ANIT_BXCS_GET_UPDATE_INFO') {
+      chrome.storage.local.get([UPDATE_STORAGE_KEY], (res) => {
+        postToPage({
+          type: 'ANIT_BXCS_UPDATE_INFO',
+          requestId: reqId,
+          host,
+          update: res?.[UPDATE_STORAGE_KEY] || null
+        });
+      });
+      return;
+    }
+
     if (d.type === 'ANIT_BXCS_SET_PORTAL_CFG') {
       const nextCfg = d.cfg || {};
       const enabled = !!nextCfg.enabled;
@@ -85,6 +103,8 @@
   const INTERVAL_MS = 2 * 60 * 60 * 1000; // 2 часа
   const AGENT_HEADER = { 'X-ANIT-AGENT': 'anitBXChatSorter' };
   const SERVER_BASE = ['https://anitconf.ru', 'apps_bxmp', 'chat_sorter_srv', 'public'].join('/');
+  const UPDATE_STORAGE_KEY = 'anit_update_info';
+  const HEALTH_FAIL_THRESHOLD = 3;
 
   function getPortalHost() {
     return location.host;
@@ -113,6 +133,66 @@
     return new Promise(resolve => {
       chrome.storage.local.set({ [k]: cacheObj }, () => resolve());
     });
+  }
+
+  function getHealthKey(host) {
+    return `anit_bxcs_maphealth_${host}`;
+  }
+
+  function loadMappingHealth(host) {
+    const k = getHealthKey(host);
+    return new Promise(resolve => {
+      chrome.storage.local.get([k], res => {
+        const val = res?.[k];
+        if (!val || typeof val !== 'object') {
+          resolve({ failCount: 0, reason: '', lastFailureAt: 0 });
+          return;
+        }
+        resolve({
+          failCount: Number.isFinite(Number(val.failCount)) ? Number(val.failCount) : 0,
+          reason: String(val.reason || ''),
+          lastFailureAt: Number.isFinite(Number(val.lastFailureAt)) ? Number(val.lastFailureAt) : 0
+        });
+      });
+    });
+  }
+
+  function saveMappingHealth(host, health) {
+    const k = getHealthKey(host);
+    return new Promise(resolve => {
+      chrome.storage.local.set({
+        [k]: {
+          failCount: Number(health?.failCount || 0),
+          reason: String(health?.reason || ''),
+          lastFailureAt: Number(health?.lastFailureAt || 0)
+        }
+      }, () => resolve());
+    });
+  }
+
+  function postMappingHealthToPage(host, health) {
+    window.postMessage({
+      type: 'ANIT_BXCS_MAPPING_HEALTH',
+      host,
+      health: {
+        failCount: Number(health?.failCount || 0),
+        reason: String(health?.reason || ''),
+        lastFailureAt: Number(health?.lastFailureAt || 0),
+        threshold: HEALTH_FAIL_THRESHOLD
+      }
+    }, '*');
+  }
+
+  function shouldCountAsPortalKeyFailure(status, bodyText) {
+    const code = Number(status || 0);
+    if (code === 401 || code === 403) return true;
+    if (code >= 500) return false;
+    const text = String(bodyText || '').toLowerCase();
+    if (!text) return false;
+    return text.includes('api key required')
+      || text.includes('bad api key')
+      || text.includes('api key revoked')
+      || text.includes('bad api key payload');
   }
 
   function postBundleToPage(host, serverBase, bundle) {
@@ -170,6 +250,18 @@
 
     if (!resp.ok) {
       if (resp.status !== 304) console.warn(LOGP, 'mapping status', resp.status);
+      let bodyText = '';
+      try { bodyText = await resp.text(); } catch (_) {}
+      if (shouldCountAsPortalKeyFailure(resp.status, bodyText)) {
+        const prev = await loadMappingHealth(host);
+        const next = {
+          failCount: Number(prev.failCount || 0) + 1,
+          reason: 'possible_bad_api_key',
+          lastFailureAt: Date.now()
+        };
+        await saveMappingHealth(host, next);
+        postMappingHealthToPage(host, next);
+      }
       if (cache?.bundle) postBundleToPage(host, serverBase, cache.bundle);
       return;
     }
@@ -190,6 +282,13 @@
       ts: Date.now(),
       serverBase
     });
+
+    const health = await loadMappingHealth(host);
+    if ((health.failCount || 0) > 0) {
+      const reset = { failCount: 0, reason: '', lastFailureAt: 0 };
+      await saveMappingHealth(host, reset);
+      postMappingHealthToPage(host, reset);
+    }
 
     postBundleToPage(host, serverBase, bundle);
   }
