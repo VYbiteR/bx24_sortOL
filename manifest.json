@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ANIT B24 Chat Sorter",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Отключение группировки Открытых линий, фильтры для чатов",
   "permissions": ["storage", "tabs", "scripting"],
   "host_permissions": ["*://*.bitrix24.ru/*", "https://api.github.com/*"],
