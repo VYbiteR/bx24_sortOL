@@ -4,6 +4,7 @@
   const DYNAMIC_CS_ID_PREFIX = 'anit-cs-';
   const BITRIX24_RU_RE = /^[a-z0-9.-]+\.bitrix24\.ru$/i;
   let syncQueue = Promise.resolve();
+  const LOGP = '[ANIT-CHATSORT/BG]';
 
   function isCustomHost(host) {
     const h = String(host || '').trim().toLowerCase();
@@ -18,6 +19,33 @@
   function getCustomHostOrigins(host) {
     const h = host.replace(/^https?:\/\//, '').split('/')[0].toLowerCase();
     return ['https://' + h + '/*', 'http://' + h + '/*'];
+  }
+
+  function requestHostPermission(host) {
+    const origins = getCustomHostOrigins(host);
+    if (!chrome.permissions || !chrome.permissions.request) {
+      console.warn(LOGP, 'permissions.request unavailable', { host, origins });
+      return Promise.resolve({ granted: false, available: false });
+    }
+    return chrome.permissions.request({ origins })
+      .then((granted) => {
+        console.info(LOGP, 'permissions.request result', { host, origins, granted: !!granted });
+        return { granted: !!granted, available: true };
+      })
+      .catch((e) => {
+        console.warn(LOGP, 'permissions.request failed', { host, origins, error: String(e?.message || e) });
+        return { granted: false, available: true, error: String(e?.message || e) };
+      });
+  }
+
+  function containsHostPermission(host) {
+    const origins = getCustomHostOrigins(host);
+    if (!chrome.permissions || !chrome.permissions.contains) {
+      return Promise.resolve({ hasPermission: false, available: false });
+    }
+    return chrome.permissions.contains({ origins })
+      .then((hasPermission) => ({ hasPermission: !!hasPermission, available: true }))
+      .catch((e) => ({ hasPermission: false, available: true, error: String(e?.message || e) }));
   }
 
   function runSyncContentScriptsForPortals(portals) {
@@ -74,13 +102,31 @@
       });
       return true;
     }
-    if (msg?.type === 'ANIT_REGISTER_HOST' && msg.host) {
+    if (msg?.type === 'ANIT_REQUEST_HOST_PERMISSION' && msg.host) {
       const host = String(msg.host).trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
-      if (!host) { sendResponse?.({ ok: false }); return true; }
-      chrome.storage.sync.get(['portals'], (res) => {
-        const portals = res?.portals || {};
-        if (!portals[host]) { sendResponse?.({ ok: false }); return; }
-        syncContentScriptsForPortals(portals).then(() => sendResponse?.({ ok: true }));
+      if (!host) { sendResponse?.({ ok: false, granted: false }); return true; }
+      requestHostPermission(host).then(async (req) => {
+        const contains = await containsHostPermission(host);
+        sendResponse?.({
+          ok: true,
+          granted: !!req.granted,
+          apiAvailable: !!req.available,
+          hasPermission: !!contains.hasPermission,
+          error: req.error || contains.error || ''
+        });
+      });
+      return true;
+    }
+    if (msg?.type === 'ANIT_CHECK_HOST_PERMISSION' && msg.host) {
+      const host = String(msg.host).trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+      if (!host) { sendResponse?.({ ok: false, hasPermission: false }); return true; }
+      containsHostPermission(host).then((res) => {
+        sendResponse?.({
+          ok: true,
+          hasPermission: !!res.hasPermission,
+          apiAvailable: !!res.available,
+          error: res.error || ''
+        });
       });
       return true;
     }

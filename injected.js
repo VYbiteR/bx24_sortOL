@@ -3,9 +3,9 @@
 	(function () {
 
 	if (window.__ANITREC_RUNNING__) { return; }
-	window.__ANITREC_RUNNING__ = '2.0.3';
+	window.__ANITREC_RUNNING__ = '2.0.*';
 
-	const VER = '2.0.3';
+	const VER = '2.0.*';
 	const TAG = 'ANIT: CHAT SORTER';
 	const LBL = `%c[${TAG}]`;
 	const CSS_LOG  = 'background:#000;color:#fff;padding:1px 4px;border-radius:3px';
@@ -61,6 +61,15 @@
 
 	function getCurrentPortalHost() {
 		return window.location.host;
+	}
+
+	// No-op нормализация: оставляем совместимость вызовов без перекодирования текста.
+	function normalizeTextMaybeUtf8Mojibake(value) {
+		return String(value == null ? '' : value);
+	}
+
+	function normalizeLookupPairs(list) {
+		return Array.isArray(list) ? list : [];
 	}
 
 	function extractChatIdNumber(el) {
@@ -591,8 +600,8 @@
 	const id = normId(el.getAttribute('data-userid') || el.dataset.userid);
 	const status = parseInt(el.getAttribute('data-status') || el.dataset.status || '0', 10) || 0;
 	const hasUnread = !!el.querySelector('.bx-messenger-cl-count-digit');
-	const lastText = (el.querySelector('.bx-messenger-cl-user-desc')?.textContent || '').trim().toLowerCase();
-	const title = (el.querySelector('.bx-messenger-cl-user-title')?.textContent || '').trim().toLowerCase();
+	const lastText = normalizeTextMaybeUtf8Mojibake((el.querySelector('.bx-messenger-cl-user-desc')?.textContent || '').trim()).toLowerCase();
+	const title = normalizeTextMaybeUtf8Mojibake((el.querySelector('.bx-messenger-cl-user-title')?.textContent || '').trim()).toLowerCase();
 	const cls = el.className || '';
 	const isWhatsApp = /-wz_whatsapp_/i.test(cls);
 	const isTelegram = /-wz_telegram_/i.test(cls);
@@ -602,13 +611,13 @@
 
 	function getItemMetaInternal(el) {
 	const id = normId(el.getAttribute('data-id') || el.dataset.id || el.querySelector('[data-id]')?.getAttribute('data-id'));
-		const title = (
+		const title = normalizeTextMaybeUtf8Mojibake((
 			el.querySelector('.bx-im-chat-title__text')?.getAttribute('title') ||
 			el.querySelector('.bx-im-chat-title__text')?.textContent || ''
-		).trim().toLowerCase();
-		const lastText = (
+		).trim()).toLowerCase();
+		const lastText = normalizeTextMaybeUtf8Mojibake((
 			el.querySelector('.bx-im-list-recent-item__message_text')?.textContent || ''
-		).trim().toLowerCase();
+		).trim()).toLowerCase();
 
 
 		let counterValue = 0;
@@ -670,7 +679,7 @@
 			if (pIdx !== undefined) {
 				const p = (window.__anitProjectLookup.projects || [])[pIdx];
 				meta.projectIndex = pIdx;
-				meta.projectName = (p && p[1]) ? p[1] : 'Без проекта';
+				meta.projectName = (p && p[1]) ? normalizeTextMaybeUtf8Mojibake(p[1]) : 'Без проекта';
 			} else {
 				meta.projectIndex = -1;
 				meta.projectName = 'Без проекта';
@@ -688,7 +697,7 @@
 			if (rIdx !== undefined) {
 				const u = (window.__anitProjectLookup.users || [])[rIdx];
 				meta.responsibleIndex = rIdx;
-				meta.responsibleName = (u && u[1]) ? u[1] : 'Без исполнителя';
+				meta.responsibleName = (u && u[1]) ? normalizeTextMaybeUtf8Mojibake(u[1]) : 'Без исполнителя';
 			} else {
 				meta.responsibleIndex = 0;
 				meta.responsibleName = 'Без исполнителя';
@@ -706,7 +715,7 @@
 			if (sIdx !== undefined) {
 				const st = (window.__anitProjectLookup.statuses || [])[sIdx];
 				meta.statusIndex = sIdx;
-				meta.statusName = (st && st[1]) ? st[1] : 'Без статуса';
+				meta.statusName = (st && st[1]) ? normalizeTextMaybeUtf8Mojibake(st[1]) : 'Без статуса';
 			} else {
 				meta.statusIndex = 0;
 				meta.statusName = 'Без статуса';
@@ -2686,11 +2695,11 @@
 			if (!e.data || e.data.type !== 'anit-mapping-updated') return;
 			if (!e.data.projects && !e.data.users) return;
 			window.__anitProjectLookup = {
-				projects: Array.isArray(e.data.projects) ? e.data.projects : (window.__anitProjectLookup?.projects || []),
+				projects: Array.isArray(e.data.projects) ? normalizeLookupPairs(e.data.projects) : (window.__anitProjectLookup?.projects || []),
 				chatToProject: new Map(Array.isArray(e.data.chatToProject) ? e.data.chatToProject : (window.__anitProjectLookup?.chatToProject || [])),
-				users: Array.isArray(e.data.users) ? e.data.users : (window.__anitProjectLookup?.users || []),
+				users: Array.isArray(e.data.users) ? normalizeLookupPairs(e.data.users) : (window.__anitProjectLookup?.users || []),
 				chatToResponsible: new Map(Array.isArray(e.data.chatToResponsible) ? e.data.chatToResponsible : (window.__anitProjectLookup?.chatToResponsible || [])),
-				statuses: Array.isArray(e.data.statuses) ? e.data.statuses : (window.__anitProjectLookup?.statuses || []),
+				statuses: Array.isArray(e.data.statuses) ? normalizeLookupPairs(e.data.statuses) : (window.__anitProjectLookup?.statuses || []),
 				chatToStatus: new Map(Array.isArray(e.data.chatToStatus) ? e.data.chatToStatus : (window.__anitProjectLookup?.chatToStatus || []))
 			};
 			try { applyFilters(); } catch (err) {}
@@ -2731,12 +2740,12 @@
 		if (!d || d.type !== 'ANIT_BXCS_MAPPING' || !d.bundle) return;
 
 		const bundle = d.bundle;
-		const projects = Array.isArray(bundle.projects) ? bundle.projects : null;
+		const projects = Array.isArray(bundle.projects) ? normalizeLookupPairs(bundle.projects) : null;
 		const dmapArr = Array.isArray(bundle.dmap) ? bundle.dmap : null;
 		if (!projects || !dmapArr) return;
-		const users = Array.isArray(bundle.users) ? bundle.users : null;
+		const users = Array.isArray(bundle.users) ? normalizeLookupPairs(bundle.users) : null;
 		const dmapUArr = Array.isArray(bundle.dmapu) ? bundle.dmapu : null;
-		const statuses = Array.isArray(bundle.statuses) ? bundle.statuses : null;
+		const statuses = Array.isArray(bundle.statuses) ? normalizeLookupPairs(bundle.statuses) : null;
 		const dmapStatusArr = Array.isArray(bundle.dmapStatus) ? bundle.dmapStatus : null;
 
 		window.__anitProjectLookup = {
