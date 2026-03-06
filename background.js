@@ -3,6 +3,7 @@
   const STORAGE_KEY = 'anit_update_info';
   const DYNAMIC_CS_ID_PREFIX = 'anit-cs-';
   const BITRIX24_RU_RE = /^[a-z0-9.-]+\.bitrix24\.ru$/i;
+  let syncQueue = Promise.resolve();
 
   function isCustomHost(host) {
     const h = String(host || '').trim().toLowerCase();
@@ -19,7 +20,7 @@
     return ['https://' + h + '/*', 'http://' + h + '/*'];
   }
 
-  function syncContentScriptsForPortals(portals) {
+  function runSyncContentScriptsForPortals(portals) {
     if (!chrome.scripting || !chrome.scripting.getRegisteredContentScripts) return Promise.resolve();
     const customHosts = Object.keys(portals || {}).filter(isCustomHost);
     return chrome.scripting.getRegisteredContentScripts()
@@ -29,7 +30,11 @@
         const toAdd = customHosts.filter((h) => !our.some((r) => r.id === hostToScriptId(h)));
         let p = Promise.resolve();
         toRemove.forEach((r) => {
-          p = p.then(() => chrome.scripting.unregisterContentScripts({ ids: [r.id] }).catch(() => {}));
+          p = p.then(() =>
+            chrome.scripting.unregisterContentScripts({ ids: [r.id] }).catch((e) => {
+              console.warn('[ANIT-CHATSORT/BG] unregisterContentScripts failed', r?.id, e);
+            })
+          );
         });
         toAdd.forEach((host) => {
           const id = hostToScriptId(host);
@@ -41,13 +46,25 @@
               js: ['content.js'],
               runAt: 'document_start',
               allFrames: true,
-              matchAboutBlank: true,
-            }]).catch(() => {})
+            }]).catch((e) => {
+              // Возможна гонка между несколькими sync-вызовами: дубликат id не критичен.
+              if (String(e?.message || '').includes('Duplicate script ID')) return;
+              console.warn('[ANIT-CHATSORT/BG] registerContentScripts failed', host, origins, e);
+            })
           );
         });
         return p;
       })
-      .catch(() => {});
+      .catch((e) => {
+        console.warn('[ANIT-CHATSORT/BG] syncContentScriptsForPortals failed', e);
+      });
+  }
+
+  function syncContentScriptsForPortals(portals) {
+    syncQueue = syncQueue
+      .catch(() => {})
+      .then(() => runSyncContentScriptsForPortals(portals));
+    return syncQueue;
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

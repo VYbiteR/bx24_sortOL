@@ -30,20 +30,30 @@ function isCustomHost(host) {
   return !/^[a-z0-9.-]+\.bitrix24\.ru$/i.test(h);
 }
 
-function requestHostPermissionAndSync(host) {
-  if (!isCustomHost(host)) {
-    return Promise.resolve(true);
-  }
+function requestHostPermission(host) {
+  if (!isCustomHost(host)) return Promise.resolve(true);
   const origins = ['https://' + host + '/*', 'http://' + host + '/*'];
   if (!chrome.permissions || !chrome.permissions.request) {
-    return chrome.runtime.sendMessage({ type: 'ANIT_SYNC_CONTENT_SCRIPTS' }).then(() => true);
+    return Promise.resolve(false);
   }
-  return chrome.permissions.request({ origins }).then(
-    (granted) => {
-      return chrome.runtime.sendMessage({ type: 'ANIT_SYNC_CONTENT_SCRIPTS' }).then(() => granted);
-    },
-    () => chrome.runtime.sendMessage({ type: 'ANIT_SYNC_CONTENT_SCRIPTS' }).then(() => false)
+  return chrome.permissions.request({ origins }).then((granted) => !!granted, () => false);
+}
+
+function syncDynamicContentScripts() {
+  if (!chrome.runtime?.sendMessage) return Promise.resolve(false);
+  return chrome.runtime.sendMessage({ type: 'ANIT_SYNC_CONTENT_SCRIPTS' }).then(
+    () => true,
+    () => false
   );
+}
+
+function removeHostPermission(host) {
+  if (!isCustomHost(host)) return Promise.resolve(true);
+  const origins = ['https://' + host + '/*', 'http://' + host + '/*'];
+  if (!chrome.permissions || !chrome.permissions.remove) {
+    return Promise.resolve(false);
+  }
+  return chrome.permissions.remove({ origins }).then((removed) => !!removed, () => false);
 }
 
 function maskKey(key) {
@@ -200,6 +210,32 @@ function renderRow(host, cfg) {
   });
 
   actions.appendChild(btnToggle);
+  if (isDebugEnabled()) {
+    const btnResetPerm = createButton("Сбросить доступ");
+    if (!isCustomHost(host)) {
+      btnResetPerm.disabled = true;
+      btnResetPerm.title = "Для bitrix24.ru сброс доступа не требуется";
+    }
+    btnResetPerm.addEventListener("click", async () => {
+      const ok = await openConfirmModal(
+        "Сбросить доступ к домену?",
+        `Будет удален выданный доступ расширения к ${host}. После этого потребуется заново подтвердить разрешение.`,
+        "Сбросить доступ"
+      );
+      if (!ok) return;
+      const removed = await removeHostPermission(host);
+      await syncDynamicContentScripts();
+      await render();
+      if (removed) {
+        setStatus(`Доступ к ${host} сброшен`, "ok");
+        showToast("Доступ сброшен", "ok");
+        return;
+      }
+      setStatus(`Не удалось сбросить доступ к ${host}`, "err");
+      showToast("Не удалось сбросить доступ", "err");
+    });
+    actions.appendChild(btnResetPerm);
+  }
   actions.appendChild(btnDel);
   tdAct.appendChild(actions);
 
@@ -269,6 +305,8 @@ $("saveBtn")?.addEventListener("click", async () => {
   const host = normHost($("portalHost").value);
   const apiKey = String($("apiKey").value || "").trim();
   const enabled = !!$("enabled").checked;
+  const customHost = isCustomHost(host);
+  let customHostPermissionGranted = true;
 
   if (!validateForm(host, apiKey)) {
     setStatus("Проверьте поля формы", "err", 3500);
@@ -276,10 +314,17 @@ $("saveBtn")?.addEventListener("click", async () => {
     return;
   }
 
+  // Важно: запрашиваем доступ к кастомному домену сразу из user gesture (клик),
+  // иначе после нескольких await браузер может не показать системный prompt.
+  if (customHost) {
+    customHostPermissionGranted = await requestHostPermission(host);
+  }
+
   const portals = await loadPortals();
   const existed = !!portals[host];
   portals[host] = { enabled, apiKey };
   await savePortals(portals);
+  await syncDynamicContentScripts();
 
   $("portalHost").value = "";
   $("apiKey").value = "";
@@ -288,16 +333,9 @@ $("saveBtn")?.addEventListener("click", async () => {
 
   await render();
   let msg = existed ? "Портал обновлен" : "Портал добавлен";
-  if (isCustomHost(host)) {
-    try {
-      const granted = await requestHostPermissionAndSync(host);
-      if (!granted) {
-        msg += ". Разрешите доступ к домену для работы расширения на этой странице.";
-        showToast("Разрешите доступ к " + host + " в диалоге расширения", "err", 5000);
-      }
-    } catch (e) {
-      msg += ". Если расширение не работает на этом домене — откройте настройки и сохраните портал ещё раз.";
-    }
+  if (customHost && !customHostPermissionGranted) {
+    msg += ". Разрешите доступ к домену для работы расширения на этой странице.";
+    showToast("Разрешите доступ к " + host + " в диалоге расширения", "err", 5000);
   }
   setStatus(msg, "ok");
   showToast(existed ? "Портал обновлен" : "Портал добавлен", "ok");

@@ -80,6 +80,9 @@
 	if (gateOpened) return;
 	gateOpened = true;
 	log('GATE OPEN', { reason, url });
+	try {
+		window.postMessage({ type: 'ANIT_BXCS_CHAT_GATE_OPEN', reason: String(reason || ''), url: String(url || '') }, '*');
+	} catch {}
 	openGateResolve();
 }
 	function maybeOpenGate(from, url) {

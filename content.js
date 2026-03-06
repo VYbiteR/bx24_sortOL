@@ -110,6 +110,23 @@
     return location.host;
   }
 
+  function hasChatsContainer() {
+    return !!(
+      document.querySelector('.bx-im-list-container-task__elements')
+      || document.querySelector('.bx-im-list-container-recent__elements')
+      || document.querySelector('.bx-im-list-task__scroll-container')
+      || document.querySelector('.bx-im-list-recent__scroll-container')
+    );
+  }
+  let chatsGateOpened = false;
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    const d = event.data;
+    if (!d || d.type !== 'ANIT_BXCS_CHAT_GATE_OPEN') return;
+    chatsGateOpened = true;
+    fetchMappingOnce().catch(() => {});
+  });
+
   function getPortalsConfig() {
     return new Promise(resolve => {
       // структура: { portals: { "<host>": {enabled, apiKey} } }
@@ -208,6 +225,8 @@
   }
 
   async function fetchMappingOnce() {
+    if (!chatsGateOpened && !hasChatsContainer()) return;
+
     const host = getPortalHost();
     let portals;
     try {
