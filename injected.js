@@ -626,6 +626,10 @@
 			const numEl = el.querySelector('.bx-im-list-recent-item__counter_number');
 			if (numEl) {
 				const n = parseInt((numEl.textContent || '').replace(/\D+/g, ''), 10);
+				if (numEl.classList.contains('--no-counter')) {
+					counterValue = 0;
+					return true;
+				}
 				counterValue = Number.isFinite(n) ? n : 0;
 				return Number.isFinite(n) && n > 0;
 			}
@@ -2521,7 +2525,8 @@
 		if (!container) return;
 		if (obs) obs.disconnect();
 
-		const itemSel = IS_OL_FRAME ? '.bx-messenger-cl-item, .bx-messenger-recent-group' : '.bx-im-list-recent-item__wrap';
+		// Ignore synthetic group headers in OL, otherwise observer reacts to our own rebuilds.
+		const itemSel = IS_OL_FRAME ? '.bx-messenger-cl-item' : '.bx-im-list-recent-item__wrap';
 
 		obs = new MutationObserver((mutations) => {
 
@@ -2784,4 +2789,3 @@
 
 	try { boot().catch(e => err('fatal', e)); } catch (e) { err('fatal', e); }
 })();
-
