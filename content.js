@@ -9,11 +9,32 @@
 
 
   try {
-    const s = document.createElement('script');
-    s.src = chrome.runtime.getURL('injected.js');
-    s.async = false;
-    (document.documentElement || document.head || document.body).appendChild(s);
-    s.onload = s.onerror = () => setTimeout(() => s.remove(), 0);
+    const root = document.documentElement || document.head || document.body;
+    const injectStyle = (resourcePath, id) => {
+      if (!root || document.getElementById(id)) return;
+      const link = document.createElement('link');
+      link.id = id;
+      link.rel = 'stylesheet';
+      link.href = chrome.runtime.getURL(resourcePath);
+      root.appendChild(link);
+    };
+    const injectScript = (resourcePath) => new Promise(resolve => {
+      if (!root) return resolve();
+      const s = document.createElement('script');
+      s.src = chrome.runtime.getURL(resourcePath);
+      s.async = false;
+      s.onload = s.onerror = () => setTimeout(() => {
+        try { s.remove(); } catch (_) {}
+        resolve();
+      }, 0);
+      root.appendChild(s);
+    });
+
+    injectStyle('vendor/flatpickr/flatpickr-dark.css', 'anit-flatpickr-dark');
+    injectScript('vendor/flatpickr/flatpickr.min.js')
+      .then(() => injectScript('vendor/flatpickr/flatpickr-ru.js'))
+      .then(() => injectScript('injected.js'))
+      .catch(e => console.warn(LOGP, 'inject pipeline failed', e));
   } catch (e) {
     console.warn(LOGP, 'inject failed', e);
   }
