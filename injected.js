@@ -153,18 +153,31 @@
 		}
 		return out;
 	}
+	function normalizeDialogId(raw) {
+		if (!raw) return '';
+		const s = String(raw).toLowerCase();
+		if (/^chat\d+/.test(s)) return s;
+		if (/^\d+$/.test(s)) return 'chat' + s;
+		return s;
+	}
+	function getRecentItemDialogId(it) {
+		return normalizeDialogId(
+			it?.dialogId ?? (it?.chat_id != null ? 'chat' + it.chat_id : it?.user_id != null ? it.user_id : it?.id ?? '')
+		);
+	}
+	function getRecentItemTimestamp(it) {
+		let dateStr = it?.message?.date || it?.date_update || it?.date || it?.message?.DATE || '';
+		if (typeof dateStr === 'string') dateStr = dateStr.replace(' ', 'T');
+		return Date.parse(dateStr) || 0;
+	}
 	function mergeRecentItemsToTsMap(items) {
 		if (!Array.isArray(items) || !items.length) return 0;
 		if (!(tsMapOnce instanceof Map)) tsMapOnce = new Map();
 		let changed = 0;
 		for (const it of items) {
-			const dialogId = String(
-				it?.dialogId ?? it?.id ?? (it?.chat_id != null ? 'chat' + it.chat_id : it?.user_id != null ? it.user_id : '')
-			).toLowerCase();
+			const dialogId = getRecentItemDialogId(it);
 			if (!dialogId) continue;
-			let dateStr = it?.message?.date || it?.date_update || it?.date || it?.message?.DATE || '';
-			if (typeof dateStr === 'string') dateStr = dateStr.replace(' ', 'T');
-			const ts = Date.parse(dateStr) || 0;
+			const ts = getRecentItemTimestamp(it);
 			if ((tsMapOnce.get(dialogId) ?? null) === ts) continue;
 			tsMapOnce.set(dialogId, ts);
 			changed++;
@@ -371,12 +384,8 @@
 	if (!data) throw (lastError || new Error('recent data unavailable'));
 	const items = data?.items || data || [];
 	for (const it of items) {
-	const dialogId = String(
-	it.dialogId ?? it.id ?? (it.chat_id != null ? 'chat' + it.chat_id : it.user_id != null ? it.user_id : '')
-	).toLowerCase();
-	let dateStr = it?.message?.date || it?.date_update || it?.date || it?.message?.DATE || '';
-	if (typeof dateStr === 'string') dateStr = dateStr.replace(' ', 'T');
-	const ts = Date.parse(dateStr) || 0;
+	const dialogId = getRecentItemDialogId(it);
+	const ts = getRecentItemTimestamp(it);
 	if (dialogId) map.set(dialogId, ts);
 	}
 		log('REST tsMap size', map.size);
@@ -399,13 +408,7 @@
 		}, 0);
 	}
 
-	const normId = (raw) => {
-	if (!raw) return '';
-	const s = String(raw).toLowerCase();
-	if (/^chat\d+/.test(s)) return s;
-	if (/^\d+$/.test(s)) return 'chat' + s;
-	return s;
-};
+	const normId = (raw) => normalizeDialogId(raw);
 
 		function getChatItemElement(target) {
 			if (!target) return null;
@@ -444,6 +447,178 @@
 	let lastOrderSig = '';
 	const currentSetSignature = (ids) => Array.from(new Set(ids)).sort().join('#');
 	const currentOrderSignature = (ids) => ids.join('|');
+
+	const RU_WEEKDAY_INDEX = new Map([
+		['вс', 0], ['воскресенье', 0],
+		['пн', 1], ['понедельник', 1],
+		['вт', 2], ['вторник', 2],
+		['ср', 3], ['среда', 3],
+		['чт', 4], ['четверг', 4],
+		['пт', 5], ['пятница', 5],
+		['сб', 6], ['суббота', 6],
+	]);
+	const RU_MONTH_INDEX = new Map([
+		['янв', 0], ['январь', 0], ['января', 0],
+		['фев', 1], ['февраль', 1], ['февраля', 1],
+		['мар', 2], ['март', 2], ['марта', 2],
+		['апр', 3], ['апрель', 3], ['апреля', 3],
+		['май', 4], ['мая', 4],
+		['июн', 5], ['июнь', 5], ['июня', 5],
+		['июл', 6], ['июль', 6], ['июля', 6],
+		['авг', 7], ['август', 7], ['августа', 7],
+		['сен', 8], ['сент', 8], ['сентябрь', 8], ['сентября', 8],
+		['окт', 9], ['октябрь', 9], ['октября', 9],
+		['ноя', 10], ['ноябрь', 10], ['ноября', 10],
+		['дек', 11], ['декабрь', 11], ['декабря', 11],
+	]);
+	let olGroupDateFallback = new Map();
+	let dateBoundsCache = { fromRaw: null, toRaw: null, fromTs: 0, toTs: 0, active: false };
+	function normalizeRuDateToken(value) {
+		return String(value || '')
+			.trim()
+			.toLowerCase()
+			.replace(/\./g, '')
+			.replace(/ё/g, 'е')
+			.replace(/\s+/g, ' ');
+	}
+	function makeLocalDateTs(year, monthIndex, day, hours = 12, minutes = 0) {
+		if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || !Number.isFinite(day)) return 0;
+		const d = new Date(year, monthIndex, day, hours, minutes, 0, 0);
+		if (!Number.isFinite(d.getTime())) return 0;
+		if (d.getFullYear() !== year || d.getMonth() !== monthIndex || d.getDate() !== day) return 0;
+		return d.getTime();
+	}
+	function startOfDayTs(input) {
+		const d = input instanceof Date ? new Date(input.getTime()) : new Date(Number(input) || 0);
+		if (!Number.isFinite(d.getTime())) return 0;
+		d.setHours(0, 0, 0, 0);
+		return d.getTime();
+	}
+	function endOfDayTs(input) {
+		const d = input instanceof Date ? new Date(input.getTime()) : new Date(Number(input) || 0);
+		if (!Number.isFinite(d.getTime())) return 0;
+		d.setHours(23, 59, 59, 999);
+		return d.getTime();
+	}
+	function parseFilterDateValue(raw, endOfDay = false) {
+		const m = String(raw || '').trim().match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+		if (!m) return 0;
+		const day = Number(m[1]);
+		const monthIndex = Number(m[2]) - 1;
+		const year = Number(m[3]);
+		const ts = makeLocalDateTs(year, monthIndex, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0);
+		if (!ts) return 0;
+		return endOfDay ? endOfDayTs(ts) : startOfDayTs(ts);
+	}
+	function getActiveDateBounds() {
+		const fromRaw = String(filters.dateFrom || '').trim();
+		const toRaw = String(filters.dateTo || '').trim();
+		if (dateBoundsCache.fromRaw === fromRaw && dateBoundsCache.toRaw === toRaw) return dateBoundsCache;
+		let fromTs = parseFilterDateValue(fromRaw, false);
+		let toTs = parseFilterDateValue(toRaw, true);
+		if (fromTs && toTs && fromTs > toTs) {
+			fromTs = parseFilterDateValue(toRaw, false);
+			toTs = parseFilterDateValue(fromRaw, true);
+		}
+		dateBoundsCache = { fromRaw, toRaw, fromTs, toTs, active: !!(fromTs || toTs) };
+		return dateBoundsCache;
+	}
+	function getPreviousWeekdayTs(weekdayIndex, now = new Date()) {
+		const d = new Date(startOfDayTs(now));
+		if (!Number.isFinite(d.getTime())) return 0;
+		let diff = (d.getDay() - weekdayIndex + 7) % 7;
+		if (diff === 0) diff = 7;
+		d.setDate(d.getDate() - diff);
+		d.setHours(12, 0, 0, 0);
+		return d.getTime();
+	}
+	function parseBitrixDateLabel(label, now = new Date()) {
+		const normalized = normalizeRuDateToken(label);
+		if (!normalized) return 0;
+		if (normalized === 'сегодня') return now.getTime();
+		if (normalized === 'вчера') {
+			const d = new Date(now.getTime());
+			d.setDate(d.getDate() - 1);
+			d.setHours(12, 0, 0, 0);
+			return d.getTime();
+		}
+		const timeMatch = normalized.match(/^(\d{1,2}):(\d{2})$/);
+		if (timeMatch) {
+			return new Date(
+				now.getFullYear(),
+				now.getMonth(),
+				now.getDate(),
+				Number(timeMatch[1]),
+				Number(timeMatch[2]),
+				0,
+				0
+			).getTime();
+		}
+		if (RU_WEEKDAY_INDEX.has(normalized)) {
+			return getPreviousWeekdayTs(RU_WEEKDAY_INDEX.get(normalized), now);
+		}
+		const withoutWeekday = normalized.replace(/^[а-я]+,\s*/, '');
+		const dayMonthMatch = withoutWeekday.match(/^(\d{1,2})\s+([а-я]+)(?:\s+(\d{4}))?$/);
+		if (!dayMonthMatch) return 0;
+		const day = Number(dayMonthMatch[1]);
+		const monthIndex = RU_MONTH_INDEX.get(dayMonthMatch[2]);
+		const year = dayMonthMatch[3] ? Number(dayMonthMatch[3]) : now.getFullYear();
+		if (!Number.isFinite(day) || monthIndex == null || !Number.isFinite(year)) return 0;
+		return makeLocalDateTs(year, monthIndex, day, 12, 0);
+	}
+	function buildOlGroupDateMap(container) {
+		const map = new Map();
+		if (!container) return map;
+		let currentTs = 0;
+		for (const node of Array.from(container.children || [])) {
+			if (node.matches?.('.bx-messenger-recent-group')) {
+				currentTs = parseBitrixDateLabel(node.querySelector('.bx-messenger-recent-group-title')?.textContent || '');
+				continue;
+			}
+			if (!node.matches?.('.bx-messenger-cl-item')) continue;
+			const id = normId(node.getAttribute('data-userid') || node.dataset.userid);
+			if (id) map.set(id, currentTs);
+		}
+		return map;
+	}
+	function syncFlatpickrInputValue(input, value) {
+		if (!input) return;
+		const normalized = String(value || '').trim();
+		if (input._flatpickr) {
+			if (!normalized) input._flatpickr.clear(false);
+			else input._flatpickr.setDate(normalized, false, 'd.m.Y');
+			return;
+		}
+		input.value = normalized;
+	}
+	function initDatePickers(host, attempt = 0) {
+		if (!host) return;
+		const fromInput = host.querySelector('#anit_date_from');
+		const toInput = host.querySelector('#anit_date_to');
+		if (!fromInput && !toInput) return;
+		const fp = window.flatpickr;
+		if (!fp) {
+			if (attempt < 10) setTimeout(() => initDatePickers(host, attempt + 1), 150);
+			return;
+		}
+		const locale = fp.l10ns?.ru || 'ru';
+		const options = (input) => ({
+			dateFormat: 'd.m.Y',
+			locale,
+			allowInput: true,
+			disableMobile: true,
+			monthSelectorType: 'dropdown',
+			prevArrow: '<span aria-hidden="true">‹</span>',
+			nextArrow: '<span aria-hidden="true">›</span>',
+			onChange: () => {
+				input.dispatchEvent(new Event('change', { bubbles: true }));
+			},
+		});
+		if (fromInput && !fromInput._flatpickr) fp(fromInput, options(fromInput));
+		if (toInput && !toInput._flatpickr) fp(toInput, options(toInput));
+		syncFlatpickrInputValue(fromInput, filters.dateFrom);
+		syncFlatpickrInputValue(toInput, filters.dateTo);
+	}
 
 	const RU_DAYS_SHORT = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 	const RU_MONTHS_GEN = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
@@ -497,6 +672,8 @@
 	withAttach: false,
 	status: 'any',
 	query: '',
+	dateFrom: '',
+	dateTo: '',
 	onlyWhatsApp: false,
 	onlyTelegram: false,
 	typesSelected: [],
@@ -734,7 +911,8 @@
 	const isWhatsApp = /-wz_whatsapp_/i.test(cls);
 	const isTelegram = /-wz_telegram_/i.test(cls);
 	const hasAttach = /\[(вложение|файл)\]/i.test(lastText);
-	return { id, status, hasUnread, lastText, title, isWhatsApp, isTelegram, hasAttach, type: 'ol' };
+	const dateTs = tsMapOnce?.get?.(id) || olGroupDateFallback.get(id) || 0;
+	return { id, status, hasUnread, lastText, title, isWhatsApp, isTelegram, hasAttach, type: 'ol', dateTs };
 }
 
 	function getItemMetaInternal(el) {
@@ -799,7 +977,13 @@
 
 	const hasAttach = /\[(вложение|файл)\]/i.test(lastText);
 
-	const meta = { id, hasUnread, lastText, title, hasAttach, type: itemType, status: 0, isWhatsApp: false, isTelegram: false, isSystemMessage, isSystemUnreadOnly };
+	const dateLabel = normalizeTextMaybeUtf8Mojibake((
+		el.querySelector('.bx-im-list-recent-item__date span:last-child')?.textContent ||
+		el.querySelector('.bx-im-list-recent-item__date span')?.textContent ||
+		''
+	).trim());
+	const dateTs = parseBitrixDateLabel(dateLabel);
+	const meta = { id, hasUnread, lastText, title, hasAttach, type: itemType, status: 0, isWhatsApp: false, isTelegram: false, isSystemMessage, isSystemUnreadOnly, dateLabel, dateTs };
 
 	// project mapping only in "task chats" mode
 	if (isTasksChatsModeNow() && window.__anitProjectLookup?.chatToProject) {
@@ -907,6 +1091,13 @@
 	const haystack = [meta.title, meta.lastText, meta.projectName, meta.responsibleName, meta.statusName].filter(Boolean).join(' ').toLowerCase();
 	if (!haystack.includes(q)) return false;
 }
+	const dateBounds = getActiveDateBounds();
+	if (dateBounds.active) {
+		const itemTs = Number(meta.dateTs || 0);
+		if (!itemTs) return false;
+		if (dateBounds.fromTs && itemTs < dateBounds.fromTs) return false;
+		if (dateBounds.toTs && itemTs > dateBounds.toTs) return false;
+	}
 	// project filter only in "task chats" mode
 	if (!IS_OL_FRAME && isTasksChatsModeNow()) {
 		const pSel = Array.isArray(filters.projectIndexes) ? filters.projectIndexes : [];
@@ -947,6 +1138,7 @@
 
 	if (IS_OL_FRAME) {
 		muteOlObserverTick();
+		olGroupDateFallback = buildOlGroupDateMap(container);
 		container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
 	}
 
@@ -978,7 +1170,7 @@
 		hidden.forEach(el => frag.appendChild(el));
 		container.appendChild(frag);
 	}
-	if (IS_OL_FRAME) rebuildDateGroups(tsMapOnce || new Map());
+	if (IS_OL_FRAME) rebuildDateGroups((tsMapOnce && tsMapOnce.size) ? tsMapOnce : olGroupDateFallback);
 }
 
 
@@ -1018,9 +1210,12 @@
 } catch { return false; }
 }
 		function uiFromFilters(host){
+			initDatePickers(host);
 			host.querySelector('#anit_unread').checked = !!filters.unreadOnly;
 			host.querySelector('#anit_attach').checked = !!filters.withAttach;
 			host.querySelector('#anit_query').value = String(filters.query || '');
+			syncFlatpickrInputValue(host.querySelector('#anit_date_from'), filters.dateFrom);
+			syncFlatpickrInputValue(host.querySelector('#anit_date_to'), filters.dateTo);
 			const hc = host.querySelector('#anit_hide_completed');
 			if (hc) hc.checked = !!filters.hideCompletedTasks;
 			const hs = host.querySelector('#anit_hide_system');
@@ -1053,6 +1248,8 @@
 			filters.unreadOnly = host.querySelector('#anit_unread').checked;
 			filters.withAttach = host.querySelector('#anit_attach').checked;
 			filters.query      = host.querySelector('#anit_query').value;
+			filters.dateFrom   = String(host.querySelector('#anit_date_from')?.value || '').trim();
+			filters.dateTo     = String(host.querySelector('#anit_date_to')?.value || '').trim();
 			filters.hideCompletedTasks = host.querySelector('#anit_hide_completed')?.checked || false;
 			filters.hideSystemMessages = isTasksChatsModeNow() ? (host.querySelector('#anit_hide_system')?.checked || false) : false;
 			if (IS_OL_FRAME) {
@@ -1336,6 +1533,9 @@
 #anit-filters input[type="checkbox"]:checked::before{transform:rotate(45deg) scale(1)}
 #anit-filters input[type="text"]{padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:#0f1115;color:#fff;outline:none}
 #anit-filters #anit_query{width:100%}
+#anit-filters .anit-date-row{display:flex;gap:6px;align-items:center;flex-wrap:nowrap}
+#anit-filters .anit-date-row input{flex:1 1 0;min-width:0}
+#anit-filters .anit-date-sep{opacity:.6;flex:0 0 auto}
 #anit-filters #anit_project_input,#anit-filters #anit_responsible_input{width:90%}
 #anit-filters .project-wrap{position:relative;flex:1 1 220px;min-width:0;max-width:100%}
 #anit-filters #anit_projects_row{align-items:center}
@@ -1502,6 +1702,11 @@
     <div class="group-title">Поиск</div>
     <div class="row">
       <input type="text" id="anit_query" placeholder="Поиск по имени/последнему сообщению">
+    </div>
+    <div class="row anit-date-row">
+    <input type="text" id="anit_date_from" placeholder="От">
+    <span class="anit-date-sep">—</span>
+    <input type="text" id="anit_date_to" placeholder="До">
     </div>
   </div>
 
@@ -2359,6 +2564,9 @@
 	host.querySelector('#anit_unread').checked = !!filters.unreadOnly;
 	host.querySelector('#anit_attach').checked = !!filters.withAttach;
 	host.querySelector('#anit_query').value = String(filters.query || '');
+	initDatePickers(host);
+	syncFlatpickrInputValue(host.querySelector('#anit_date_from'), filters.dateFrom);
+	syncFlatpickrInputValue(host.querySelector('#anit_date_to'), filters.dateTo);
 	const hc = host.querySelector('#anit_hide_completed');
 	if (hc) hc.checked = !!filters.hideCompletedTasks;
 	const hs = host.querySelector('#anit_hide_system');
@@ -2380,6 +2588,8 @@
 	filters.unreadOnly = host.querySelector('#anit_unread').checked;
 	filters.withAttach = host.querySelector('#anit_attach').checked;
 	filters.query      = host.querySelector('#anit_query').value;
+	filters.dateFrom   = String(host.querySelector('#anit_date_from')?.value || '').trim();
+	filters.dateTo     = String(host.querySelector('#anit_date_to')?.value || '').trim();
 	filters.hideCompletedTasks = host.querySelector('#anit_hide_completed')?.checked || false;
 	filters.hideSystemMessages = isTasksChatsModeNow() ? (host.querySelector('#anit_hide_system')?.checked || false) : false;
 
@@ -2441,6 +2651,8 @@
 	const hs = host.querySelector('#anit_hide_system');
 	if (hs) hs.checked = false;
 	host.querySelector('#anit_query').value = '';
+	syncFlatpickrInputValue(host.querySelector('#anit_date_from'), '');
+	syncFlatpickrInputValue(host.querySelector('#anit_date_to'), '');
 	if (wasOL) {
 	const st = host.querySelector('#anit_status');
 	if (st) st.value = 'any';
@@ -2604,6 +2816,7 @@
 
 	const ids = items.map(el => normId(el.getAttribute('data-userid') || el.dataset.userid));
 	const setSig = currentSetSignature(ids);
+	const orderSigNow = currentOrderSignature(ids);
 
 	if (rankMap.size && setSig === frozenSetSig && !tsMapLocal.size) {
 		const orderSigNow = currentOrderSignature(ids);
@@ -2637,13 +2850,13 @@
 
 	const newIds = items.map(el => normId(el.getAttribute('data-userid') || el.dataset.userid));
 	const newOrderSig = currentOrderSignature(newIds);
-	if (newOrderSig !== lastOrderSig) {
+	if (newOrderSig !== orderSigNow) {
 		muteOlObserverTick();
 		const frag = document.createDocumentFragment();
 		for (const el of items) frag.appendChild(el);
 			container.appendChild(frag);
-			lastOrderSig = newOrderSig;
 	}
+	lastOrderSig = newOrderSig;
 
 	rankMap = new Map(newIds.map((id, i) => [id, i]));
 	frozenSetSig = currentSetSignature(newIds);

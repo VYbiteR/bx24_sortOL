@@ -143,6 +143,14 @@ function notifyTabsToRefetch(host) {
   } catch (_) {}
 }
 
+async function commitPortals(portals, hostsToRefetch = []) {
+  await savePortals(portals);
+  await syncDynamicContentScripts();
+  for (const host of hostsToRefetch) {
+    if (host) notifyTabsToRefetch(host);
+  }
+  await render();
+}
 function createButton(text, cls = "icon-btn") {
   const btn = document.createElement("button");
   btn.type = "button";
@@ -189,8 +197,7 @@ function renderRow(host, cfg) {
     const portals = await loadPortals();
     if (!portals[host]) return;
     portals[host].enabled = !portals[host].enabled;
-    await savePortals(portals);
-    await render();
+    await commitPortals(portals, [host]);
     showToast(portals[host].enabled ? "Портал включен" : "Портал отключен", "ok");
   });
 
@@ -204,8 +211,7 @@ function renderRow(host, cfg) {
     if (!ok) return;
     const portals = await loadPortals();
     delete portals[host];
-    await savePortals(portals);
-    await render();
+    await commitPortals(portals, [host]);
     showToast("Портал удален", "ok");
   });
 
@@ -323,15 +329,13 @@ $("saveBtn")?.addEventListener("click", async () => {
   const portals = await loadPortals();
   const existed = !!portals[host];
   portals[host] = { enabled, apiKey };
-  await savePortals(portals);
-  await syncDynamicContentScripts();
+  await commitPortals(portals, [host]);
 
   $("portalHost").value = "";
   $("apiKey").value = "";
   $("enabled").checked = true;
   clearValidationHints();
 
-  await render();
   let msg = existed ? "Портал обновлен" : "Портал добавлен";
   if (customHost && !customHostPermissionGranted) {
     msg += ". Разрешите доступ к домену для работы расширения на этой странице.";
@@ -348,8 +352,8 @@ $("clearBtn")?.addEventListener("click", async () => {
     "Очистить"
   );
   if (!ok) return;
-  await savePortals({});
-  await render();
+  const portals = await loadPortals();
+  await commitPortals({}, Object.keys(portals));
   setStatus("Все настройки очищены", "ok");
   showToast("Все настройки очищены", "ok");
 });
