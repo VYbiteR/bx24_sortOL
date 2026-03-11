@@ -666,7 +666,8 @@
 }
 
 
-	const LS_KEY = 'anit.filters.v2';
+	const LS_KEY_BASE = 'anit.filters.v2';
+	const FILTERS_LS_KEY = (mode) => `${LS_KEY_BASE}.${mode}`;
 	const defaultFilters = () => ({
 	unreadOnly: false,
 	withAttach: false,
@@ -686,12 +687,22 @@
 	hiddenResponsibleIndexes: [],
 	sortMode: 'native',
 });
+	let currentFiltersMode = null;
 	let filters = loadFilters();
-	function loadFilters() {
-	try { return { ...defaultFilters(), ...(JSON.parse(localStorage.getItem(LS_KEY) || '{}')) }; }
-	catch { return defaultFilters(); }
+	function loadFilters(mode = getPanelModeKey()) {
+		currentFiltersMode = mode;
+		try { return { ...defaultFilters(), ...(JSON.parse(localStorage.getItem(FILTERS_LS_KEY(mode)) || '{}')) }; }
+		catch { return defaultFilters(); }
 }
-	function saveFilters() { try { localStorage.setItem(LS_KEY, JSON.stringify(filters)); } catch {} }
+	function saveFilters(mode = currentFiltersMode || getPanelModeKey()) {
+		currentFiltersMode = mode;
+		try { localStorage.setItem(FILTERS_LS_KEY(mode), JSON.stringify(filters)); } catch {}
+	}
+	function ensureFiltersMode(mode = getPanelModeKey()) {
+		if (currentFiltersMode === mode) return false;
+		filters = loadFilters(mode);
+		return true;
+	}
 		function ensureMultiPanel() {
 			if (multiPanelHost) return multiPanelHost;
 
@@ -2798,6 +2809,7 @@
 	if (!IS_OL_FRAME) {
 		const pane = document.getElementById('anit-filters');
 		const needMode = getPanelModeKey();
+		ensureFiltersMode(needMode);
 		if (pane && pane.dataset.mode !== needMode) {
 			pane.remove();
 			filtersHost = null;
@@ -2923,11 +2935,12 @@
 	routeObs = new MutationObserver(() => {
 	const onChats = isInternalChatsDOM();
 	const havePanel = !!document.getElementById('anit-filters');
+	const needMode = getPanelModeKey();
+	if (onChats) ensureFiltersMode(needMode);
 	if (onChats && !havePanel) {
 	buildFiltersPanel().then(applyFilters);
 } else if (onChats && havePanel) {
 	const pane = document.getElementById('anit-filters');
-	const needMode = getPanelModeKey();
 	if (pane && pane.dataset.mode !== needMode) {
 		pane.remove();
 		filtersHost = null;
