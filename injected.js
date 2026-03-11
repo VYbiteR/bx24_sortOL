@@ -82,9 +82,12 @@
 
 	const OL_URL_RX =
 	/(\/rest\/.*im\.recent\.(list|get|pin)|\/bitrix\/services\/main\/ajax\.php\?[^#]*action=im\.recent\.(list|get|pin))/i;
+	const OL_RECENT_REFRESH_URL_RX =
+	/(\/rest\/.*im\.recent\.(list|get)\b|\/bitrix\/services\/main\/ajax\.php\?[^#]*action=im\.recent\.(list|get)\b|\/bitrix\/components\/bitrix\/im\.messenger\/im\.ajax\.php\?[^#]*UPDATE_STATE\b)/i;
 	let gateOpened = false;
 	let openGateResolve;
 	const gatePromise = new Promise(r => (openGateResolve = r));
+	let networkRebuildScheduled = false;
 	function openGate(reason, url) {
 	if (gateOpened) return;
 	gateOpened = true;
@@ -93,17 +96,107 @@
 		window.postMessage({ type: 'ANIT_BXCS_CHAT_GATE_OPEN', reason: String(reason || ''), url: String(url || '') }, '*');
 	} catch {}
 	openGateResolve();
-}
+	}
 	function maybeOpenGate(from, url) {
 	if (!gateOpened && OL_URL_RX.test(String(url || ''))) openGate(from, url);
-}
+	}
+	function shouldTrackOlRecentResponse(url) {
+		return IS_OL_FRAME && OL_RECENT_REFRESH_URL_RX.test(String(url || ''));
+	}
+	function scheduleOlNetworkRebuild(reason) {
+		if (!IS_OL_FRAME) return;
+		if (networkRebuildScheduled) return;
+		networkRebuildScheduled = true;
+		setTimeout(async () => {
+			networkRebuildScheduled = false;
+			try {
+				await rebuildList(reason || 'network-update', { tsMap: tsMapOnce || new Map() });
+			} catch (e) {
+				warn('network rebuild failed', e);
+			}
+		}, 80);
+	}
+	function parseResponseJsonSafe(text) {
+		if (typeof text !== 'string' || !text.trim()) return null;
+		try { return JSON.parse(text); } catch { return null; }
+	}
+	function extractRecentItemsFromPayload(payload) {
+		const out = [];
+		const seen = new Set();
+		const queue = [{ value: payload, depth: 0 }];
+		let budget = 0;
+		while (queue.length && budget < 5000) {
+			budget++;
+			const { value, depth } = queue.shift();
+			if (!value || typeof value !== 'object') continue;
+			if (seen.has(value)) continue;
+			seen.add(value);
+			if (Array.isArray(value)) {
+				for (const item of value) queue.push({ value: item, depth: depth + 1 });
+				continue;
+			}
+			const hasId =
+				value.dialogId != null ||
+				value.id != null ||
+				value.chat_id != null ||
+				value.user_id != null;
+			const hasDate =
+				value.date != null ||
+				value.date_update != null ||
+				value.message?.date != null ||
+				value.message?.DATE != null;
+			if (hasId && hasDate) out.push(value);
+			if (depth >= 6) continue;
+			for (const key of Object.keys(value)) {
+				queue.push({ value: value[key], depth: depth + 1 });
+			}
+		}
+		return out;
+	}
+	function mergeRecentItemsToTsMap(items) {
+		if (!Array.isArray(items) || !items.length) return 0;
+		if (!(tsMapOnce instanceof Map)) tsMapOnce = new Map();
+		let changed = 0;
+		for (const it of items) {
+			const dialogId = String(
+				it?.dialogId ?? it?.id ?? (it?.chat_id != null ? 'chat' + it.chat_id : it?.user_id != null ? it.user_id : '')
+			).toLowerCase();
+			if (!dialogId) continue;
+			let dateStr = it?.message?.date || it?.date_update || it?.date || it?.message?.DATE || '';
+			if (typeof dateStr === 'string') dateStr = dateStr.replace(' ', 'T');
+			const ts = Date.parse(dateStr) || 0;
+			if ((tsMapOnce.get(dialogId) ?? null) === ts) continue;
+			tsMapOnce.set(dialogId, ts);
+			changed++;
+		}
+		return changed;
+	}
+	function processOlRecentPayload(payload, meta = {}) {
+		if (!IS_OL_FRAME || !payload) return;
+		const items = extractRecentItemsFromPayload(payload);
+		const changed = mergeRecentItemsToTsMap(items);
+		if (!changed) return;
+		log('tsMap refreshed from network', { changed, source: meta.source || 'unknown', url: meta.url || '' });
+		scheduleOlNetworkRebuild(meta.reason || 'network-update');
+	}
 
 	(function hookFetch() {
 	const orig = window.fetch && window.fetch.bind(window);
 	if (!orig) return;
-	window.fetch = function (input, init) {
-	try { maybeOpenGate('fetch', typeof input === 'string' ? input : input?.url); } catch {}
-	return orig(input, init);
+	window.fetch = async function (input, init) {
+	const url = typeof input === 'string' ? input : input?.url;
+	try { maybeOpenGate('fetch', url); } catch {}
+	const resp = await orig(input, init);
+	if (shouldTrackOlRecentResponse(url)) {
+		try {
+			const cloned = resp.clone();
+			cloned.text().then(text => {
+				const payload = parseResponseJsonSafe(text);
+				if (payload) processOlRecentPayload(payload, { source: 'fetch', url, reason: 'network-fetch' });
+			}).catch(() => {});
+		} catch {}
+	}
+	return resp;
 };
 })();
 	(function hookXHR() {
@@ -112,7 +205,18 @@
 	const _open = XO.prototype.open;
 	const _send = XO.prototype.send;
 	XO.prototype.open = function (m, url, ...rest) { this.__anit_url = url; return _open.call(this, m, url, ...rest); };
-	XO.prototype.send = function (body) { try { maybeOpenGate('xhr', this.__anit_url || ''); } catch {} return _send.call(this, body); };
+	XO.prototype.send = function (body) {
+		try { maybeOpenGate('xhr', this.__anit_url || ''); } catch {}
+		if (shouldTrackOlRecentResponse(this.__anit_url || '')) {
+			this.addEventListener('load', () => {
+				try {
+					const payload = parseResponseJsonSafe(this.responseText);
+					if (payload) processOlRecentPayload(payload, { source: 'xhr', url: this.__anit_url || '', reason: 'network-xhr' });
+				} catch {}
+			}, { once: true });
+		}
+		return _send.call(this, body);
+	};
 })();
 
 	function armDomRetroGate() {
@@ -248,12 +352,23 @@
 	return map;
 }
 	try {
-	const data = await new Promise((resolve, reject) => {
-	BXNS.rest.callMethod('im.recent.list', { ONLY_OPENLINES: 'Y' }, (res) => {
-	if (typeof res?.data !== 'function') return reject(new Error('unexpected BX.rest response'));
-	resolve(res.data());
-});
-});
+	let data = null;
+	let lastError = null;
+	for (const method of ['im.recent.get', 'im.recent.list']) {
+		try {
+			data = await new Promise((resolve, reject) => {
+				BXNS.rest.callMethod(method, { ONLY_OPENLINES: 'Y' }, (res) => {
+					if (typeof res?.data !== 'function') return reject(new Error(`unexpected BX.rest response for ${method}`));
+					resolve(res.data());
+				});
+			});
+			log('recent ts source', method);
+			break;
+		} catch (e) {
+			lastError = e;
+		}
+	}
+	if (!data) throw (lastError || new Error('recent data unavailable'));
 	const items = data?.items || data || [];
 	for (const it of items) {
 	const dialogId = String(
@@ -270,6 +385,18 @@
 		warn('REST error, без tsMap', e);
 		return map;
 	}
+	}
+
+	let suppressOlObserver = false;
+	let suppressOlObserverTimer = null;
+	function muteOlObserverTick() {
+		if (!IS_OL_FRAME) return;
+		suppressOlObserver = true;
+		if (suppressOlObserverTimer) clearTimeout(suppressOlObserverTimer);
+		suppressOlObserverTimer = setTimeout(() => {
+			suppressOlObserver = false;
+			suppressOlObserverTimer = null;
+		}, 0);
 	}
 
 	const normId = (raw) => {
@@ -341,6 +468,7 @@
 	if (!IS_OL_FRAME) return;
 	const container = findContainerOL();
 	if (!container) return;
+	muteOlObserverTick();
 	container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
 	const items = Array.from(container.querySelectorAll('.bx-messenger-cl-item'))
 	.filter(el => el.style.display !== 'none');
@@ -817,7 +945,10 @@
 	const container = findContainer();
 	if (!container) return;
 
-	if (IS_OL_FRAME) container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
+	if (IS_OL_FRAME) {
+		muteOlObserverTick();
+		container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
+	}
 
 	const items = IS_OL_FRAME
 	? Array.from(container.querySelectorAll('.bx-messenger-cl-item'))
@@ -2465,6 +2596,7 @@
 	}
 
 	const tsMapLocal = opts.tsMap || tsMapOnce || new Map();
+	muteOlObserverTick();
 	container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
 
 	const items = Array.from(container.querySelectorAll('.bx-messenger-cl-item'));
@@ -2473,7 +2605,7 @@
 	const ids = items.map(el => normId(el.getAttribute('data-userid') || el.dataset.userid));
 	const setSig = currentSetSignature(ids);
 
-	if (rankMap.size && setSig === frozenSetSig) {
+	if (rankMap.size && setSig === frozenSetSig && !tsMapLocal.size) {
 		const orderSigNow = currentOrderSignature(ids);
 		const shouldBe = Array.from(ids).sort((a, b) => (rankMap.get(a) ?? 1e9) - (rankMap.get(b) ?? 1e9));
 		const wantedSig = currentOrderSignature(shouldBe);
@@ -2494,18 +2626,19 @@
 	items.sort((a, b) => {
 		const aId = normId(a.getAttribute('data-userid') || a.dataset.userid);
 		const bId = normId(b.getAttribute('data-userid') || b.dataset.userid);
-		const ra = rankMap.has(aId) ? rankMap.get(aId) : 1e9;
-		const rb = rankMap.has(bId) ? rankMap.get(bId) : 1e9;
-		if (ra !== rb) return ra - rb;
 		const ta = tsMapLocal.get(aId) ?? -1;
 		const tb = tsMapLocal.get(bId) ?? -1;
 		if (ta !== tb) return tb - ta;
+		const ra = rankMap.has(aId) ? rankMap.get(aId) : 1e9;
+		const rb = rankMap.has(bId) ? rankMap.get(bId) : 1e9;
+		if (ra !== rb) return ra - rb;
 		return (currentIndex.get(a) ?? 0) - (currentIndex.get(b) ?? 0);
 	});
 
 	const newIds = items.map(el => normId(el.getAttribute('data-userid') || el.dataset.userid));
 	const newOrderSig = currentOrderSignature(newIds);
 	if (newOrderSig !== lastOrderSig) {
+		muteOlObserverTick();
 		const frag = document.createDocumentFragment();
 		for (const el of items) frag.appendChild(el);
 			container.appendChild(frag);
@@ -2528,7 +2661,8 @@
 		// Ignore synthetic group headers in OL, otherwise observer reacts to our own rebuilds.
 		const itemSel = IS_OL_FRAME ? '.bx-messenger-cl-item' : '.bx-im-list-recent-item__wrap';
 
-		obs = new MutationObserver((mutations) => {
+	obs = new MutationObserver((mutations) => {
+		if (IS_OL_FRAME && suppressOlObserver) return;
 
 		const stillInternal = isInternalChatsDOM();
 		if (!IS_OL_FRAME && !stillInternal) {
@@ -2550,8 +2684,17 @@
 	if (rebuildScheduled) return;
 	rebuildScheduled = true;
 	setTimeout(async () => {
-	rebuildScheduled = false;
-	await rebuildList('observer');
+		rebuildScheduled = false;
+		if (IS_OL_FRAME) {
+			let freshMap = new Map();
+			try {
+				freshMap = await getRecentTsMap();
+			} catch {}
+			if (freshMap.size) tsMapOnce = freshMap;
+			await rebuildList('observer-fresh-ts', { tsMap: freshMap.size ? freshMap : (tsMapOnce || new Map()) });
+			return;
+		}
+		await rebuildList('observer');
 }, 80);
 });
 

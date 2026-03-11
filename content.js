@@ -1,5 +1,6 @@
 (function () {
   const LOGP = '[ANIT-CHATSORT/CS]';
+  const UPDATE_STORAGE_KEY = 'anit_update_info';
 
 
   if (self === top && typeof location !== 'undefined' && /\/marketplace\//.test(location.pathname || '')) {
@@ -33,24 +34,62 @@
     try { window.postMessage(payload, '*'); } catch (_) {}
   }
 
-  async function getPortals() {
-    return await new Promise(resolve => {
+  function storageGetSafe(area, keys, fallbackValue, pick) {
+    return new Promise(resolve => {
       try {
-        chrome.storage.sync.get(['portals'], res => resolve(res?.portals || {}));
-      } catch (_) {
-        resolve({});
+        const storageArea = chrome?.storage?.[area];
+        if (!chrome?.runtime?.id || !storageArea?.get) {
+          resolve(fallbackValue);
+          return;
+        }
+        storageArea.get(keys, res => {
+          try {
+            if (chrome?.runtime?.lastError) {
+              console.warn(LOGP, `storage.${area}.get failed`, chrome.runtime.lastError.message);
+              resolve(fallbackValue);
+              return;
+            }
+            resolve(typeof pick === 'function' ? pick(res || {}) : (res || fallbackValue));
+          } catch (_) {
+            resolve(fallbackValue);
+          }
+        });
+      } catch (e) {
+        console.warn(LOGP, `storage.${area}.get failed`, e);
+        resolve(fallbackValue);
       }
     });
   }
 
-  async function setPortals(portals) {
-    return await new Promise(resolve => {
+  function storageSetSafe(area, payload) {
+    return new Promise(resolve => {
       try {
-        chrome.storage.sync.set({ portals }, () => resolve(true));
-      } catch (_) {
+        const storageArea = chrome?.storage?.[area];
+        if (!chrome?.runtime?.id || !storageArea?.set) {
+          resolve(false);
+          return;
+        }
+        storageArea.set(payload, () => {
+          if (chrome?.runtime?.lastError) {
+            console.warn(LOGP, `storage.${area}.set failed`, chrome.runtime.lastError.message);
+            resolve(false);
+            return;
+          }
+          resolve(true);
+        });
+      } catch (e) {
+        console.warn(LOGP, `storage.${area}.set failed`, e);
         resolve(false);
       }
     });
+  }
+
+  async function getPortals() {
+    return await storageGetSafe('sync', ['portals'], {}, res => res?.portals || {});
+  }
+
+  async function setPortals(portals) {
+    return await storageSetSafe('sync', { portals });
   }
 
   window.addEventListener('message', async (event) => {
@@ -75,13 +114,12 @@
     }
 
     if (d.type === 'ANIT_BXCS_GET_UPDATE_INFO') {
-      chrome.storage.local.get([UPDATE_STORAGE_KEY], (res) => {
-        postToPage({
-          type: 'ANIT_BXCS_UPDATE_INFO',
-          requestId: reqId,
-          host,
-          update: res?.[UPDATE_STORAGE_KEY] || null
-        });
+      const update = await storageGetSafe('local', [UPDATE_STORAGE_KEY], null, res => res?.[UPDATE_STORAGE_KEY] || null);
+      postToPage({
+        type: 'ANIT_BXCS_UPDATE_INFO',
+        requestId: reqId,
+        host,
+        update
       });
       return;
     }
@@ -103,7 +141,6 @@
   const INTERVAL_MS = 2 * 60 * 60 * 1000; // 2 часа
   const AGENT_HEADER = { 'X-ANIT-AGENT': 'anitBXChatSorter' };
   const SERVER_BASE = ['https://anitconf.ru', 'apps_bxmp', 'chat_sorter_srv', 'public'].join('/');
-  const UPDATE_STORAGE_KEY = 'anit_update_info';
   const HEALTH_FAIL_THRESHOLD = 3;
 
   function getPortalHost() {
@@ -128,10 +165,7 @@
   });
 
   function getPortalsConfig() {
-    return new Promise(resolve => {
-      // структура: { portals: { "<host>": {enabled, apiKey} } }
-      chrome.storage.sync.get(['portals'], res => resolve(res.portals || {}));
-    });
+    return storageGetSafe('sync', ['portals'], {}, res => res?.portals || {});
   }
 
   function getCacheKey(host) {
@@ -140,16 +174,12 @@
 
   function loadCache(host) {
     const k = getCacheKey(host);
-    return new Promise(resolve => {
-      chrome.storage.local.get([k], res => resolve(res[k] || null));
-    });
+    return storageGetSafe('local', [k], null, res => res?.[k] || null);
   }
 
   function saveCache(host, cacheObj) {
     const k = getCacheKey(host);
-    return new Promise(resolve => {
-      chrome.storage.local.set({ [k]: cacheObj }, () => resolve());
-    });
+    return storageSetSafe('local', { [k]: cacheObj });
   }
 
   function getHealthKey(host) {
@@ -158,32 +188,27 @@
 
   function loadMappingHealth(host) {
     const k = getHealthKey(host);
-    return new Promise(resolve => {
-      chrome.storage.local.get([k], res => {
-        const val = res?.[k];
-        if (!val || typeof val !== 'object') {
-          resolve({ failCount: 0, reason: '', lastFailureAt: 0 });
-          return;
-        }
-        resolve({
-          failCount: Number.isFinite(Number(val.failCount)) ? Number(val.failCount) : 0,
-          reason: String(val.reason || ''),
-          lastFailureAt: Number.isFinite(Number(val.lastFailureAt)) ? Number(val.lastFailureAt) : 0
-        });
-      });
+    return storageGetSafe('local', [k], { failCount: 0, reason: '', lastFailureAt: 0 }, res => {
+      const val = res?.[k];
+      if (!val || typeof val !== 'object') {
+        return { failCount: 0, reason: '', lastFailureAt: 0 };
+      }
+      return {
+        failCount: Number.isFinite(Number(val.failCount)) ? Number(val.failCount) : 0,
+        reason: String(val.reason || ''),
+        lastFailureAt: Number.isFinite(Number(val.lastFailureAt)) ? Number(val.lastFailureAt) : 0
+      };
     });
   }
 
   function saveMappingHealth(host, health) {
     const k = getHealthKey(host);
-    return new Promise(resolve => {
-      chrome.storage.local.set({
-        [k]: {
-          failCount: Number(health?.failCount || 0),
-          reason: String(health?.reason || ''),
-          lastFailureAt: Number(health?.lastFailureAt || 0)
-        }
-      }, () => resolve());
+    return storageSetSafe('local', {
+      [k]: {
+        failCount: Number(health?.failCount || 0),
+        reason: String(health?.reason || ''),
+        lastFailureAt: Number(health?.lastFailureAt || 0)
+      }
     });
   }
 
@@ -211,6 +236,7 @@
       || text.includes('api key revoked')
       || text.includes('bad api key payload');
   }
+
 
   function postBundleToPage(host, serverBase, bundle) {
     window.postMessage(
@@ -331,3 +357,4 @@
     }
   });
 })();
+
