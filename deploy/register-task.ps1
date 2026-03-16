@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $taskName = "ANIT bx24_sortOL Updater"
 $scriptPath = "C:\ProgramData\ANIT\bx24_sortOL\updater\updater.ps1"

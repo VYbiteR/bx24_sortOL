@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $baseDir = "C:\ProgramData\ANIT\bx24_sortOL"
 $configPath = Join-Path $baseDir "config.json"
