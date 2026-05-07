@@ -22,6 +22,8 @@
   let editFolderId = '';
   let activeEmojiGroup = 'recent';
   let renderQueued = false;
+  let lastBarStructureKey = '';
+  let suppressFolderClickUntil = 0;
 
   function isFoldersEnabled() {
     return !api?.isTasksMode?.();
@@ -41,6 +43,7 @@
     }
     barHost = null;
     managerHost = null;
+    lastBarStructureKey = '';
   }
 
   function getAllEmojis() {
@@ -114,9 +117,14 @@
   function ensureBar() {
     if (barHost?.isConnected) return barHost;
 
-    const host = document.createElement('div');
-    host.id = 'anit-folder-native-bar';
-    host.innerHTML = `
+    let host = document.getElementById('anit-folder-native-bar');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'anit-folder-native-bar';
+    }
+
+    if (!host.querySelector('.anit-folder-strip') || !host.querySelector('.anit-folder-nav')) {
+      host.innerHTML = `
       <style>
         #anit-folder-native-bar {
           position: sticky;
@@ -128,6 +136,13 @@
           background: var(--im-list-recent__background-color, var(--ui-color-background-primary, #fff));
           border-bottom: 1px solid var(--im-messenger__list_border-color, var(--ui-color-base-10, #edeef0));
           box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+        }
+        #anit-folder-native-bar .anit-folder-bar-inner {
+          display: grid;
+          grid-template-columns: 20px minmax(0, 1fr) 20px;
+          align-items: center;
+          gap: 2px;
+          min-width: 0;
         }
         #anit-folder-native-bar .anit-folder-strip {
           display: flex;
@@ -147,6 +162,31 @@
         }
         #anit-folder-native-bar .anit-folder-strip.is-dragging {
           cursor: grabbing;
+        }
+        #anit-folder-native-bar .anit-folder-nav {
+          width: 20px;
+          height: 24px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 0;
+          border-radius: 6px;
+          background: transparent;
+          color: var(--ui-color-text-subtle, #000000);
+          cursor: pointer;
+          font: 16px / 1 var(--ui-font-family-primary, system-ui);
+          opacity: .72;
+          transition: background .15s ease, color .15s ease, opacity .15s ease;
+        }
+        #anit-folder-native-bar .anit-folder-nav:hover {
+          background: var(--ui-color-bg-state-hover-default, rgba(0, 0, 0, 0.03));
+          color: var(--ui-color-text-primary, #333);
+          opacity: 1;
+        }
+        #anit-folder-native-bar .anit-folder-nav:disabled {
+          opacity: .2;
+          cursor: default;
+          pointer-events: none;
         }
         #anit-folder-native-bar .anit-folder-chip {
           position: relative;
@@ -200,8 +240,14 @@
           text-align: center;
         }
       </style>
-      <div class="anit-folder-strip"></div>
+      <div class="anit-folder-bar-inner">
+        <button type="button" class="anit-folder-nav" data-folder-scroll="-1" aria-label="Прокрутить папки влево">‹</button>
+        <div class="anit-folder-strip"></div>
+        <button type="button" class="anit-folder-nav" data-folder-scroll="1" aria-label="Прокрутить папки вправо">›</button>
+      </div>
     `;
+      lastBarStructureKey = '';
+    }
     barHost = host;
     return host;
   }
@@ -797,31 +843,69 @@
     return host.querySelector('.anit-folder-strip');
   }
 
+  function updateFolderNavState(strip) {
+    const host = strip?.closest('#anit-folder-native-bar');
+    if (!host) return;
+    const left = host.querySelector('[data-folder-scroll="-1"]');
+    const right = host.querySelector('[data-folder-scroll="1"]');
+    const maxLeft = Math.max(0, strip.scrollWidth - strip.clientWidth);
+    if (left) left.disabled = strip.scrollLeft <= 1;
+    if (right) right.disabled = strip.scrollLeft >= maxLeft - 1;
+  }
+
+  function scrollFolderStrip(strip, direction) {
+    const step = Math.max(120, Math.round(strip.clientWidth * 0.65));
+    strip.scrollBy({ left: step * direction, behavior: 'smooth' });
+    requestAnimationFrame(() => updateFolderNavState(strip));
+  }
+
   function bindStripInteractions(strip) {
     if (!strip || strip.dataset.bound === '1') return;
     strip.dataset.bound = '1';
+    const host = strip.closest('#anit-folder-native-bar');
 
     strip.addEventListener('wheel', (event) => {
       if (Math.abs(event.deltaY) < Math.abs(event.deltaX) && !event.shiftKey) return;
       event.preventDefault();
       strip.scrollLeft += event.deltaY || event.deltaX;
+      updateFolderNavState(strip);
     }, { passive: false });
+
+    strip.addEventListener('scroll', () => updateFolderNavState(strip), { passive: true });
 
     strip.addEventListener('mousedown', (event) => {
       if (event.button !== 0) return;
-      if (event.target.closest('button')) return;
-      dragState = { startX: event.clientX, startLeft: strip.scrollLeft };
+      if (event.target.closest('[data-folder-scroll]')) return;
+      dragState = { strip, startX: event.clientX, startLeft: strip.scrollLeft, moved: false };
       strip.classList.add('is-dragging');
     });
 
     window.addEventListener('mousemove', (event) => {
       if (!dragState) return;
-      strip.scrollLeft = dragState.startLeft - (event.clientX - dragState.startX);
+      const deltaX = event.clientX - dragState.startX;
+      if (Math.abs(deltaX) > 4) {
+        dragState.moved = true;
+        event.preventDefault();
+      }
+      dragState.strip.scrollLeft = dragState.startLeft - deltaX;
+      updateFolderNavState(dragState.strip);
     });
 
     window.addEventListener('mouseup', () => {
+      if (dragState?.moved) {
+        suppressFolderClickUntil = Date.now() + 250;
+      }
+      const activeStrip = dragState?.strip || strip;
       dragState = null;
-      strip.classList.remove('is-dragging');
+      activeStrip.classList.remove('is-dragging');
+    });
+
+    host?.querySelectorAll('[data-folder-scroll]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const direction = Number(button.getAttribute('data-folder-scroll') || 0);
+        if (!direction) return;
+        scrollFolderStrip(strip, direction);
+      });
     });
   }
 
@@ -834,10 +918,59 @@
     });
   }
 
+  function renderFolderChip(item) {
+    return `
+        <button type="button" class="anit-folder-chip" data-folder-bar="${escapeHtml(item.id)}">
+          <span class="anit-folder-chip-name">${escapeHtml(item.name)}</span>
+          <span class="anit-folder-chip-count"></span>
+          <span class="anit-folder-chip-unread" hidden></span>
+        </button>
+      `;
+  }
+
+  function bindFolderChipClicks(strip) {
+    strip.querySelectorAll('[data-folder-bar]').forEach((button) => {
+      if (button.dataset.clickBound === '1') return;
+      button.dataset.clickBound = '1';
+      button.addEventListener('click', (event) => {
+        if (Date.now() < suppressFolderClickUntil) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        api.setSelectedFolderFilter(button.getAttribute('data-folder-bar') || 'all');
+      });
+    });
+  }
+
+  function updateFolderChips(strip, items, stats, activeFolderId) {
+    const structureKey = items.map((item) => `${item.id}:${item.name}`).join('|');
+    if (structureKey !== lastBarStructureKey || strip.children.length !== items.length) {
+      strip.innerHTML = items.map(renderFolderChip).join('');
+      lastBarStructureKey = structureKey;
+      bindFolderChipClicks(strip);
+    }
+
+    items.forEach((item) => {
+      const button = strip.querySelector(`[data-folder-bar="${CSS.escape(item.id)}"]`);
+      if (!button) return;
+      const stat = stats.get(item.id) || { total: 0, unread: 0 };
+      button.classList.toggle('is-active', activeFolderId === item.id);
+      const count = button.querySelector('.anit-folder-chip-count');
+      if (count) count.textContent = String(stat.total);
+      const unread = button.querySelector('.anit-folder-chip-unread');
+      if (unread) {
+        unread.hidden = !stat.unread;
+        unread.textContent = stat.unread ? String(stat.unread) : '';
+      }
+    });
+  }
+
   function renderBar() {
     if (!isFoldersEnabled()) {
       if (barHost?.isConnected) barHost.remove();
       barHost = null;
+      lastBarStructureKey = '';
       return;
     }
     const strip = mountBar();
@@ -852,24 +985,9 @@
       { id: '__none__', name: 'Без папки' }
     ];
 
-    strip.innerHTML = items.map((item) => {
-      const stat = stats.get(item.id) || { total: 0, unread: 0 };
-      return `
-        <button type="button" class="anit-folder-chip${activeFolderId === item.id ? ' is-active' : ''}" data-folder-bar="${item.id}">
-          <span class="anit-folder-chip-name">${escapeHtml(item.name)}</span>
-          <span class="anit-folder-chip-count">${stat.total}</span>
-          ${stat.unread ? `<span class="anit-folder-chip-unread">${stat.unread}</span>` : ''}
-        </button>
-      `;
-    }).join('');
-
-    strip.querySelectorAll('[data-folder-bar]').forEach((button) => {
-      button.addEventListener('click', () => {
-        api.setSelectedFolderFilter(button.getAttribute('data-folder-bar') || 'all');
-      });
-    });
-
+    updateFolderChips(strip, items, stats, activeFolderId);
     bindStripInteractions(strip);
+    updateFolderNavState(strip);
   }
 
   function openManager() {
