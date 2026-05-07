@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ANIT B24 Chat Sorter",
-  "version": "2.0.5",
+  "version": "2.1.0",
   "description": "Отключение группировки Открытых линий, фильтры для чатов",
   "permissions": ["storage", "tabs", "scripting", "alarms"],
   "host_permissions": ["*://*.bitrix24.ru/*", "https://api.github.com/*"],
@@ -21,7 +21,7 @@
     "run_at": "document_idle"
   }],
   "web_accessible_resources": [
-    {"resources": ["injected.js", "vendor/flatpickr/flatpickr.min.js", "vendor/flatpickr/flatpickr-ru.js", "vendor/flatpickr/flatpickr-dark.css"], "matches": ["*://*.bitrix24.ru/*"]},
-    {"resources": ["injected.js", "vendor/flatpickr/flatpickr.min.js", "vendor/flatpickr/flatpickr-ru.js", "vendor/flatpickr/flatpickr-dark.css"], "matches": ["<all_urls>"]}
+    {"resources": ["injected.js", "injected-folders.js", "vendor/flatpickr/flatpickr.min.js", "vendor/flatpickr/flatpickr-ru.js", "vendor/flatpickr/flatpickr-dark.css"], "matches": ["*://*.bitrix24.ru/*"]},
+    {"resources": ["injected.js", "injected-folders.js", "vendor/flatpickr/flatpickr.min.js", "vendor/flatpickr/flatpickr-ru.js", "vendor/flatpickr/flatpickr-dark.css"], "matches": ["<all_urls>"]}
   ]
 }

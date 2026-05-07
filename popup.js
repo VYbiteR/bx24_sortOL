@@ -43,7 +43,7 @@
       currentBlock.style.display = 'none';
     } else {
       updateBlock.style.display = 'none';
-      currentText.textContent = 'Версия ' + currentVer + ' — актуальна';
+      currentText.textContent = 'Версия ' + currentVer + ' актуальна';
     }
   });
 })();
