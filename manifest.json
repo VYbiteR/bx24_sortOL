@@ -21,7 +21,7 @@
     "run_at": "document_idle"
   }],
   "web_accessible_resources": [
-    {"resources": ["injected.js", "injected-folders.js", "vendor/flatpickr/flatpickr.min.js", "vendor/flatpickr/flatpickr-ru.js", "vendor/flatpickr/flatpickr-dark.css"], "matches": ["*://*.bitrix24.ru/*"]},
-    {"resources": ["injected.js", "injected-folders.js", "vendor/flatpickr/flatpickr.min.js", "vendor/flatpickr/flatpickr-ru.js", "vendor/flatpickr/flatpickr-dark.css"], "matches": ["<all_urls>"]}
+    {"resources": ["injected.js", "injected-folders.js", "injected-modules/folder-bridge-layer.js", "injected-modules/folder-domain.js", "injected-modules/folder-assignment-menu.js", "injected-modules/mapping-bridge.js", "injected-modules/folder-bar-view.js", "injected-modules/folder-filter-section.js", "injected-modules/folder-manager-view.js", "vendor/flatpickr/flatpickr.min.js", "vendor/flatpickr/flatpickr-ru.js", "vendor/flatpickr/flatpickr-dark.css"], "matches": ["*://*.bitrix24.ru/*"]},
+    {"resources": ["injected.js", "injected-folders.js", "injected-modules/folder-bridge-layer.js", "injected-modules/folder-domain.js", "injected-modules/folder-assignment-menu.js", "injected-modules/mapping-bridge.js", "injected-modules/folder-bar-view.js", "injected-modules/folder-filter-section.js", "injected-modules/folder-manager-view.js", "vendor/flatpickr/flatpickr.min.js", "vendor/flatpickr/flatpickr-ru.js", "vendor/flatpickr/flatpickr-dark.css"], "matches": ["<all_urls>"]}
   ]
 }

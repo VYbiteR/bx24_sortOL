@@ -28,337 +28,70 @@
 	let multiRmbTargetEl = null;
 	let multiPanelHost = null;
 	let multiEnteredViaRmb = false;
-	let multiFolderMenuHost = null;
-	let folderState = { folders: [], chatFolders: {}, updatedAt: 0 };
-	const FOLDER_FILTER_ALL = 'all';
-	const FOLDER_FILTER_NONE = '__none__';
-	const folderBridgeWaiters = new Map();
+	const FolderDomain = window.__ANIT_BXCS_MODULES__.createFolderDomain({
+		getMode: getFolderModeKey,
+		createRequestId,
+		getPortalHost: getCurrentPortalHost,
+		getFilters: () => filters
+	});
+	const FOLDER_FILTER_ALL = FolderDomain.constants.FOLDER_FILTER_ALL;
+	const FOLDER_FILTER_NONE = FolderDomain.constants.FOLDER_FILTER_NONE;
+	const normalizeFolderId = FolderDomain.normalizeFolderId;
+	const escapeHtml = FolderDomain.escapeHtml;
+	const setFolderState = FolderDomain.setState;
+	const getAssignedFolderIds = FolderDomain.getAssignedFolderIds;
+	const enrichMetaWithFolder = FolderDomain.enrichMetaWithFolder;
+	const renderFolderFilterTabs = FolderDomain.renderFilterTabs;
+	const refreshFolderStateFromExtension = FolderDomain.refreshState;
+	const showFolderBridgeError = FolderDomain.showBridgeError;
+	const FolderBridgeLayer = FolderDomain.bridgeLayer;
 
-	function getFolderModeKey() {
-		return IS_OL_FRAME ? 'ol' : 'internal';
-	}
-
-	function createRequestId(prefix) {
-		return `${String(prefix || 'anit')}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-	}
-
-	function normalizeFolderId(folderId) {
-		return String(folderId || '').trim();
-	}
-
-	function normalizeFolderName(name) {
-		return String(name || '').replace(/\s+/g, ' ').trim().slice(0, 64);
-	}
-
-	function normalizeChatIdValue(chatId) {
-		return String(chatId || '').trim();
-	}
-
-	function normalizeFolderState(state) {
-		const foldersInput = Array.isArray(state?.folders) ? state.folders : [];
-		const folders = [];
-		const seenFolderIds = new Set();
-		foldersInput.forEach((folder, index) => {
-			const id = normalizeFolderId(folder?.id) || `folder_${index}`;
-			if (seenFolderIds.has(id)) return;
-			seenFolderIds.add(id);
-			folders.push({
-				id,
-				name: normalizeFolderName(folder?.name) || `Folder ${index + 1}`,
-				color: String(folder?.color || '').trim() || '#5d8cff',
-				createdAt: Number(folder?.createdAt || Date.now())
-			});
-		});
-		const validFolderIds = new Set(folders.map((folder) => folder.id));
-		const chatFolders = {};
-		const rawChatFolders = state?.chatFolders && typeof state.chatFolders === 'object' ? state.chatFolders : {};
-		Object.entries(rawChatFolders).forEach(([chatId, folderValue]) => {
-			const normalizedChatId = normalizeChatIdValue(chatId);
-			if (!normalizedChatId) return;
-			const normalizedFolderIds = Array.from(new Set(
-				(Array.isArray(folderValue) ? folderValue : [folderValue])
-					.map(normalizeFolderId)
-					.filter((folderId) => folderId && validFolderIds.has(folderId))
-			));
-			if (!normalizedFolderIds.length) return;
-			chatFolders[normalizedChatId] = normalizedFolderIds;
-		});
-		return {
-			folders,
-			chatFolders,
-			updatedAt: Number(state?.updatedAt || 0)
-		};
-	}
-
-	function setFolderState(nextState) {
-		folderState = normalizeFolderState(nextState);
-		try {
-			window.dispatchEvent(new CustomEvent('ANIT_BXCS_FOLDERS_UPDATED', {
-				detail: {
-					mode: getFolderModeKey(),
-					state: folderState
-				}
-			}));
-		} catch (_) {}
-	}
-
-	function getFolderById(folderId) {
-		const normalizedFolderId = normalizeFolderId(folderId);
-		if (!normalizedFolderId) return null;
-		return folderState.folders.find((folder) => folder.id === normalizedFolderId) || null;
-	}
-
-	function getAssignedFolderIds(chatId) {
-		const normalizedChatId = normalizeChatIdValue(chatId);
-		return normalizedChatId && Array.isArray(folderState.chatFolders?.[normalizedChatId])
-			? folderState.chatFolders[normalizedChatId].slice()
-			: [];
-	}
-
-	function enrichMetaWithFolder(meta) {
-		if (!meta || !meta.id) return meta;
-		meta.folderIds = getAssignedFolderIds(meta.id);
-		return meta;
-	}
-
-	function syncFolderFilterValue() {
-		if (!filters) return;
-		const activeFolderId = String(filters.folderId || FOLDER_FILTER_ALL);
-		if (activeFolderId === FOLDER_FILTER_ALL || activeFolderId === FOLDER_FILTER_NONE) return;
-		if (!getFolderById(activeFolderId)) {
-			filters.folderId = FOLDER_FILTER_ALL;
-		}
-	}
-
-	function renderFolderFilterTabs(host) {
-		const root = host?.querySelector?.('#anit_folder_tabs');
-		if (!root) return;
-
-		syncFolderFilterValue();
-		const activeFolderId = String(filters.folderId || FOLDER_FILTER_ALL);
-		const items = [
-			{ id: FOLDER_FILTER_ALL, name: 'Все' },
-			...folderState.folders.map((folder) => ({ id: folder.id, name: folder.name, color: folder.color })),
-			{ id: FOLDER_FILTER_NONE, name: 'Без папки' }
-		];
-
-		root.innerHTML = items.map((item) => {
-			const safeColor = String(item.color || '').replace(/"/g, '');
-			const isActive = activeFolderId === item.id;
-			const style = safeColor ? ` style="--folder-chip-color:${safeColor}"` : '';
-			return `<button type="button" class="anit-folder-chip${isActive ? ' is-selected' : ''}" data-folder-filter="${item.id}"${style}>${item.name}</button>`;
-		}).join('');
-	}
-
-	function requestFolderBridge(action, payload = {}) {
-		return new Promise((resolve) => {
-			const requestId = createRequestId(`folder_${action.toLowerCase()}`);
-			folderBridgeWaiters.set(requestId, resolve);
+	const FolderAssignmentMenu = window.__ANIT_BXCS_MODULES__.createFolderAssignmentMenu({
+		normalizeFolderId,
+		escapeHtml,
+		folderBridge: FolderBridgeLayer,
+		getSelectedChatIds: () => Array.from(multiSelectedIds),
+		getFolders: () => FolderDomain.getState().folders,
+		getAssignedFolderIds,
+		setFolderState,
+		showFolderBridgeError,
+		exitMultiSelectMode,
+		applyFiltersSafe: () => { try { applyFilters(); } catch (_) {} },
+		renderFolderFilterTabsSafe: () => { try { renderFolderFilterTabs(filtersHost); } catch (_) {} }
+	});
+	const MappingBridge = window.__ANIT_BXCS_MODULES__.createMappingBridge({
+		normalizeLookupPairs,
+		applyFiltersSafe: () => { try { if (typeof applyFilters === 'function') applyFilters(); } catch (_) {} },
+		refreshTaskFilterPanelSafe: () => {
 			try {
-				window.postMessage({
-					type: 'ANIT_BXCS_CHAT_FOLDERS_REQUEST',
-					requestId,
-					host: getCurrentPortalHost(),
-					mode: getFolderModeKey(),
-					action,
-					payload
-				}, '*');
-			} catch (_) {
-				folderBridgeWaiters.delete(requestId);
-				resolve({ ok: false, error: 'bridge_post_failed' });
-			}
-			setTimeout(() => {
-				if (!folderBridgeWaiters.has(requestId)) return;
-				folderBridgeWaiters.delete(requestId);
-				resolve({ ok: false, error: 'bridge_timeout' });
-			}, 5000);
-		});
-	}
+				if (!filtersHost || !isTasksChatsModeNow()) return;
+				const row = filtersHost.querySelector('#anit_projects_row');
+				const hasMapping = !!window.__anitProjectLookup?.projects;
 
-	async function refreshFolderStateFromExtension() {
-		const response = await requestFolderBridge('GET_STATE');
-		if (response?.state) {
-			setFolderState(response.state);
+				if (row && row.style.display === 'none' && hasMapping) {
+					document.getElementById('anit-filters')?.remove();
+					filtersHost = null;
+					buildFiltersPanel().then(() => applyFilters());
+					return;
+				}
+
+				try { uiFromFilters(filtersHost); } catch (_) {}
+			} catch (_) {}
 		}
-		return response;
-	}
-
-	function showFolderBridgeError(response, fallbackMessage) {
-		const errorCode = String(response?.error || '').trim();
-		const message = errorCode === 'storage_persist_failed'
-			? 'Не удалось сохранить папки в хранилище браузера. Повторите действие после перезагрузки расширения.'
-			: fallbackMessage;
-		if (!message) return;
-		try { window.alert(message); } catch (_) {}
-	}
+	});
 
 	function hideFolderAssignMenu() {
-		if (multiFolderMenuHost) {
-			multiFolderMenuHost.style.display = 'none';
-		}
+		FolderAssignmentMenu.hide();
 	}
-
-	function ensureFolderAssignMenu() {
-		if (multiFolderMenuHost) return multiFolderMenuHost;
-		const menu = document.createElement('div');
-		menu.id = 'anit-folder-menu';
-		menu.style.cssText = [
-			'position:fixed',
-			'top:46px',
-			'left:50%',
-			'transform:translateX(-50%)',
-			'z-index:10000',
-			'display:none',
-			'min-width:220px',
-			'max-width:min(320px, calc(100vw - 24px))',
-			'padding:8px',
-			'background:#1f232b',
-			'border:1px solid rgba(255,255,255,.14)',
-			'border-radius:12px',
-			'box-shadow:0 12px 30px rgba(0,0,0,.38)'
-		].join(';');
-		document.body.appendChild(menu);
-		multiFolderMenuHost = menu;
-		return menu;
-	}
-
-/* legacy renderFolderAssignMenu removed during refactor
-		const menu = ensureFolderAssignMenu();
-		const folderButtons = folderState.folders.map((folder) => {
-			return `<button type="button" data-folder-id="${folder.id}" style="--folder-chip-color:${String(folder.color || '#5d8cff').replace(/"/g, '')}">${folder.name}</button>`;
-		}).join('');
-		menu.innerHTML = `
-			<div style="font:12px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#fff">
-				<div style="margin:0 0 8px 0;font-weight:700">В папку</div>
-				<div style="display:grid;gap:6px">
-					${folderButtons || '<div style="opacity:.72;padding:6px 2px">Папок пока нет</div>'}
-					<button type="button" data-folder-id="">Убрать из папки</button>
-					<button type="button" data-create-folder="1">+ Новая папка</button>
-				</div>
-			</div>
-		`;
-		menu.querySelectorAll('button').forEach((btn) => {
-			btn.style.cssText = [
-				'padding:8px 10px',
-				'border-radius:10px',
-				'border:1px solid rgba(255,255,255,.16)',
-				'background:rgba(255,255,255,.04)',
-				'color:#fff',
-				'text-align:left',
-				'cursor:pointer'
-			].join(';');
-		});
-		menu.querySelectorAll('[data-folder-id]').forEach((btn) => {
-			btn.addEventListener('click', async () => {
-				const folderId = btn.getAttribute('data-folder-id') || '';
-				hideFolderAssignMenu();
-				const response = await requestFolderBridge('ASSIGN_CHATS', {
-					chatIds: Array.from(multiSelectedIds),
-					folderId
-				});
-				if (response?.state) {
-					setFolderState(response.state);
-				}
-				exitMultiSelectMode();
-				try { applyFilters(); } catch (_) {}
-				try { renderFolderFilterTabs(filtersHost); } catch (_) {}
-			});
-		});
-		menu.querySelector('[data-create-folder="1"]')?.addEventListener('click', async () => {
-			const name = window.prompt('Название папки');
-			if (!name) return;
-			const response = await requestFolderBridge('UPSERT_FOLDER', {
-				folder: { name }
-			});
-			if (response?.state) {
-				setFolderState(response.state);
-			}
-			const newFolderId = normalizeFolderId(response?.folder?.id);
-			renderFolderAssignMenu();
-			if (!newFolderId) return;
-			const assignResponse = await requestFolderBridge('ASSIGN_CHATS', {
-				chatIds: Array.from(multiSelectedIds),
-				folderId: newFolderId
-			});
-			if (assignResponse?.state) {
-				setFolderState(assignResponse.state);
-			}
-			hideFolderAssignMenu();
-			exitMultiSelectMode();
-			try { applyFilters(); } catch (_) {}
-			try { renderFolderFilterTabs(filtersHost); } catch (_) {}
-		});
-		return menu;
-*/
 
 	function renderFolderAssignMenu() {
-		const menu = ensureFolderAssignMenu();
-		const selectedChatIds = Array.from(multiSelectedIds);
-		const selectedChats = selectedChatIds.map((chatId) => ({ chatId, folderIds: getAssignedFolderIds(chatId) }));
-		const folderButtons = folderState.folders.map((folder) => {
-			const activeCount = selectedChats.filter((chat) => chat.folderIds.includes(folder.id)).length;
-			const isAll = selectedChats.length > 0 && activeCount === selectedChats.length;
-			const isSome = activeCount > 0 && !isAll;
-			return `<label data-folder-option="${folder.id}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;border:1px solid ${isSome ? 'rgba(93,140,255,.55)' : 'rgba(255,255,255,.16)'};background:rgba(255,255,255,.04);color:#fff;cursor:pointer"><input type="checkbox" data-folder-checkbox="${folder.id}" ${isAll ? 'checked' : ''}><span style="flex:1">${folder.name}</span>${isSome ? '<span style="opacity:.72;font-size:11px">частично</span>' : ''}</label>`;
-		}).join('');
-		menu.innerHTML = `
-			<div style="font:12px/1.35 system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#fff">
-				<div style="margin:0 0 8px 0;font-weight:700">В папки</div>
-				<div style="display:grid;gap:6px">
-					${folderButtons || '<div style="opacity:.72;padding:6px 2px">Папок пока нет</div>'}
-					<div style="display:flex;gap:6px;flex-wrap:wrap;padding-top:4px">
-						<button type="button" data-clear-folders="1">Убрать из всех</button>
-						<button type="button" data-create-folder="1">+ Новая папка</button>
-						<button type="button" data-apply-folders="1" style="margin-left:auto">Применить</button>
-					</div>
-				</div>
-			</div>
-		`;
-		menu.querySelectorAll('button').forEach((btn) => {
-			btn.style.cssText = [
-				'padding:8px 10px',
-				'border-radius:10px',
-				'border:1px solid rgba(255,255,255,.16)',
-				'background:rgba(255,255,255,.04)',
-				'color:#fff',
-				'text-align:left',
-				'cursor:pointer'
-			].join(';');
-		});
-		menu.querySelector('[data-clear-folders="1"]')?.addEventListener('click', async () => {
-			hideFolderAssignMenu();
-			const response = await requestFolderBridge('ASSIGN_CHATS', { chatIds: selectedChatIds, operation: 'clear', folderIds: [] });
-			if (response?.ok && response?.state) setFolderState(response.state);
-			else showFolderBridgeError(response, 'Не удалось обновить папки чатов.');
-			exitMultiSelectMode();
-			try { applyFilters(); } catch (_) {}
-			try { renderFolderFilterTabs(filtersHost); } catch (_) {}
-		});
-		menu.querySelector('[data-create-folder="1"]')?.addEventListener('click', () => {
-			hideFolderAssignMenu();
-			try {
-				window.dispatchEvent(new CustomEvent('ANIT_BXCS_OPEN_FOLDER_MANAGER'));
-			} catch (_) {}
-		});
-		menu.querySelector('[data-apply-folders="1"]')?.addEventListener('click', async () => {
-			const folderIds = Array.from(menu.querySelectorAll('[data-folder-checkbox]:checked'))
-				.map((node) => normalizeFolderId(node.getAttribute('data-folder-checkbox')))
-				.filter(Boolean);
-			hideFolderAssignMenu();
-			const response = await requestFolderBridge('ASSIGN_CHATS', { chatIds: selectedChatIds, operation: 'replace', folderIds });
-			if (response?.ok && response?.state) setFolderState(response.state);
-			else showFolderBridgeError(response, 'Не удалось обновить папки чатов.');
-			exitMultiSelectMode();
-			try { applyFilters(); } catch (_) {}
-			try { renderFolderFilterTabs(filtersHost); } catch (_) {}
-		});
-		return menu;
+		return FolderAssignmentMenu.render();
 	}
 
 	function toggleFolderAssignMenu() {
-		const menu = renderFolderAssignMenu();
-		menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+		FolderAssignmentMenu.toggle();
 	}
+
 	function isInternalRecentDOM() {
 		return !!document.querySelector('.bx-im-list-container-recent__elements .bx-im-list-recent-item__wrap');
 	}
@@ -3376,17 +3109,11 @@
 		window.addEventListener('message', (e) => {
 			const data = e.data;
 			if (!data || typeof data !== 'object') return;
-			if (data.type === 'ANIT_BXCS_CHAT_FOLDERS_RESPONSE' && data.requestId) {
-				const resolve = folderBridgeWaiters.get(data.requestId);
-				if (resolve) {
-					folderBridgeWaiters.delete(data.requestId);
-					resolve(data);
-				}
+			if (FolderDomain.resolveBridgeResponse(data)) {
 				return;
 			}
 			if (data.type === 'ANIT_BXCS_CHAT_FOLDERS_STATE') {
 				setFolderState(data.state || {});
-				syncFolderFilterValue();
 				try { renderFolderFilterTabs(filtersHost); } catch (_) {}
 				try { if (typeof applyFilters === 'function') applyFilters(); } catch (_) {}
 			}
@@ -3534,81 +3261,18 @@
 	log('boot завершён');
 }
 
-	function decodeDeltaMap(dmap) {
-		const map = new Map();
-		if (!Array.isArray(dmap) || dmap.length < 2) return map;
-
-		let chatId = Number(dmap[0]);
-		let idx = Number(dmap[1]);
-		if (Number.isFinite(chatId) && Number.isFinite(idx)) map.set(chatId, idx);
-
-		for (let i = 2; i < dmap.length; i += 2) {
-			const delta = Number(dmap[i]);
-			const nextIdx = Number(dmap[i + 1]);
-			if (!Number.isFinite(delta) || !Number.isFinite(nextIdx)) continue;
-			chatId += delta;
-			map.set(chatId, nextIdx);
-		}
-		return map;
-	}
-
-	window.addEventListener('message', (e) => {
-		const d = e.data;
-		if (!d || d.type !== 'ANIT_BXCS_MAPPING' || !d.bundle) return;
-
-		const bundle = d.bundle;
-		const projects = Array.isArray(bundle.projects) ? normalizeLookupPairs(bundle.projects) : null;
-		const dmapArr = Array.isArray(bundle.dmap) ? bundle.dmap : null;
-		if (!projects || !dmapArr) return;
-		const users = Array.isArray(bundle.users) ? normalizeLookupPairs(bundle.users) : null;
-		const dmapUArr = Array.isArray(bundle.dmapu) ? bundle.dmapu : null;
-		const statuses = Array.isArray(bundle.statuses) ? normalizeLookupPairs(bundle.statuses) : null;
-		const dmapStatusArr = Array.isArray(bundle.dmapStatus) ? bundle.dmapStatus : null;
-
-		window.__anitProjectLookup = {
-			projects,
-			chatToProject: decodeDeltaMap(dmapArr),
-			users: users || [],
-			chatToResponsible: decodeDeltaMap(dmapUArr),
-			statuses: statuses || [],
-			chatToStatus: decodeDeltaMap(dmapStatusArr),
-			ts: bundle.ts || Date.now(),
-			portal: bundle.portal || d.host || ''
-		};
-
-		try { if (typeof applyFilters === 'function') applyFilters(); } catch (_) {}
-
-
-		try {
-			if (!filtersHost) return;
-			if (!isTasksChatsModeNow()) return;
-
-			const row = filtersHost.querySelector('#anit_projects_row');
-			const hasMapping = !!window.__anitProjectLookup?.projects;
-
-
-			if (row && row.style.display === 'none' && hasMapping) {
-				document.getElementById('anit-filters')?.remove();
-				filtersHost = null;
-				buildFiltersPanel().then(() => applyFilters());
-				return;
-			}
-
-
-			try { uiFromFilters(filtersHost); } catch {}
-		} catch {}
-	}, true);
+	MappingBridge.arm();
 
 	window.__ANIT_BXCS_FOLDERS_API__ = {
 		getMode: () => getFolderModeKey(),
 		getPortalHost: () => getCurrentPortalHost(),
-		getFolderState: () => normalizeFolderState(folderState),
-		refreshFolderState: () => refreshFolderStateFromExtension(),
-		assignChatsToFolder: (chatIds, folderIds, operation = 'replace') => requestFolderBridge('ASSIGN_CHATS', { chatIds, folderIds, operation }),
-		upsertFolder: (folder) => requestFolderBridge('UPSERT_FOLDER', { folder }),
-		deleteFolder: (folderId) => requestFolderBridge('DELETE_FOLDER', { folderId }),
-		exportFolders: () => requestFolderBridge('EXPORT_PORTAL'),
-		importFolders: (data) => requestFolderBridge('IMPORT_PORTAL', { data }),
+		getFolderState: () => FolderBridgeLayer.getState(),
+		refreshFolderState: () => FolderBridgeLayer.refreshState(),
+		assignChatsToFolder: (chatIds, folderIds, operation = 'replace') => FolderBridgeLayer.assignChats(chatIds, folderIds, operation),
+		upsertFolder: (folder) => FolderBridgeLayer.upsertFolder(folder),
+		deleteFolder: (folderId) => FolderBridgeLayer.deleteFolder(folderId),
+		exportFolders: () => FolderBridgeLayer.exportPortal(),
+		importFolders: (data) => FolderBridgeLayer.importPortal(data),
 		getChatItemElement: (target) => getChatItemElement(target),
 		getChatIdFromElement: (el) => getChatIdFromElement(el),
 		getItemMeta: (el) => getItemMeta(el),

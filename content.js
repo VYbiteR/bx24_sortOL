@@ -35,7 +35,14 @@
     injectStyle('vendor/flatpickr/flatpickr-dark.css', 'anit-flatpickr-dark');
     injectScript('vendor/flatpickr/flatpickr.min.js')
       .then(() => injectScript('vendor/flatpickr/flatpickr-ru.js'))
+      .then(() => injectScript('injected-modules/folder-bridge-layer.js'))
+      .then(() => injectScript('injected-modules/folder-domain.js'))
+      .then(() => injectScript('injected-modules/folder-assignment-menu.js'))
+      .then(() => injectScript('injected-modules/mapping-bridge.js'))
       .then(() => injectScript('injected.js'))
+      .then(() => injectScript('injected-modules/folder-bar-view.js'))
+      .then(() => injectScript('injected-modules/folder-filter-section.js'))
+      .then(() => injectScript('injected-modules/folder-manager-view.js'))
       .then(() => injectScript('injected-folders.js'))
       .catch(e => console.warn(LOGP, 'inject pipeline failed', e));
   } catch (e) {
