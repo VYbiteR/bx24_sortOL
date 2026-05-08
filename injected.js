@@ -28,8 +28,11 @@
 	let multiRmbTargetEl = null;
 	let multiPanelHost = null;
 	let multiEnteredViaRmb = false;
+		function createRequestId(prefix) {
+			return `${String(prefix || 'anit')}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+		}
 	const FolderDomain = window.__ANIT_BXCS_MODULES__.createFolderDomain({
-		getMode: getFolderModeKey,
+		getMode: getPanelModeKey,
 		createRequestId,
 		getPortalHost: getCurrentPortalHost,
 		getFilters: () => filters
@@ -152,6 +155,7 @@
 	let openGateResolve;
 	const gatePromise = new Promise(r => (openGateResolve = r));
 	let networkRebuildScheduled = false;
+	let olObserverFramePending = false;
 	function openGate(reason, url) {
 	if (gateOpened) return;
 	gateOpened = true;
@@ -171,14 +175,14 @@
 		if (!IS_OL_FRAME) return;
 		if (networkRebuildScheduled) return;
 		networkRebuildScheduled = true;
-		setTimeout(async () => {
+		requestAnimationFrame(async () => {
 			networkRebuildScheduled = false;
 			try {
 				await rebuildList(reason || 'network-update', { tsMap: tsMapOnce || new Map() });
 			} catch (e) {
 				warn('network rebuild failed', e);
 			}
-		}, 80);
+		});
 	}
 	function parseResponseJsonSafe(text) {
 		if (typeof text !== 'string' || !text.trim()) return null;
@@ -3054,19 +3058,19 @@
 		}
 	}
 	if (!need) return;
+	if (IS_OL_FRAME) {
+		if (olObserverFramePending) return;
+		olObserverFramePending = true;
+		requestAnimationFrame(async () => {
+			olObserverFramePending = false;
+			await rebuildList('observer', { tsMap: tsMapOnce || new Map() });
+		});
+		return;
+	}
 	if (rebuildScheduled) return;
 	rebuildScheduled = true;
 	setTimeout(async () => {
 		rebuildScheduled = false;
-		if (IS_OL_FRAME) {
-			let freshMap = new Map();
-			try {
-				freshMap = await getRecentTsMap();
-			} catch {}
-			if (freshMap.size) tsMapOnce = freshMap;
-			await rebuildList('observer-fresh-ts', { tsMap: freshMap.size ? freshMap : (tsMapOnce || new Map()) });
-			return;
-		}
 		await rebuildList('observer');
 }, 80);
 });
@@ -3264,7 +3268,7 @@
 	MappingBridge.arm();
 
 	window.__ANIT_BXCS_FOLDERS_API__ = {
-		getMode: () => getFolderModeKey(),
+		getMode: () => getPanelModeKey(),
 		getPortalHost: () => getCurrentPortalHost(),
 		getFolderState: () => FolderBridgeLayer.getState(),
 		refreshFolderState: () => FolderBridgeLayer.refreshState(),
