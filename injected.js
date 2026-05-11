@@ -28,6 +28,8 @@
 	let multiRmbTargetEl = null;
 	let multiPanelHost = null;
 	let multiEnteredViaRmb = false;
+	/** Курсор пагинации im.v2.Recent.tail для раздела «чаты задач» (между кликами «Загрузить ещё»). */
+	let anitTaskRecentTailCursor = null;
 		function createRequestId(prefix) {
 			return `${String(prefix || 'anit')}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 		}
@@ -411,6 +413,228 @@
 					}
 				}, tick);
 			});
+		}
+
+		function sleep(ms) {
+			return new Promise((resolve) => setTimeout(resolve, ms));
+		}
+
+		function getActiveInternalListRoot() {
+			try { return findContainerInternal?.() || null; } catch { return null; }
+		}
+
+		function countInternalRecentItems() {
+			try {
+				const root = getActiveInternalListRoot();
+				if (root) return root.querySelectorAll('.bx-im-list-recent-item__wrap').length;
+				return document.querySelectorAll('.bx-im-list-recent-item__wrap').length;
+			} catch {
+				return 0;
+			}
+		}
+
+		function getOldestInternalRecentTs() {
+			try {
+				const root = getActiveInternalListRoot();
+				const items = (root || document).querySelectorAll('.bx-im-list-recent-item__wrap');
+				const last = items && items.length ? items[items.length - 1] : null;
+				if (!last) return 0;
+				const label = String(
+					last.querySelector('.bx-im-list-recent-item__date span:last-child')?.textContent ||
+					last.querySelector('.bx-im-list-recent-item__date span')?.textContent ||
+					last.querySelector('.bx-im-list-recent-item__date')?.textContent ||
+					''
+				).trim();
+				const ts = parseBitrixDateLabel(label);
+				return Number.isFinite(ts) ? ts : 0;
+			} catch {
+				return 0;
+			}
+		}
+
+		function calcCutoff12MonthsTs(now = new Date()) {
+			const d = new Date(now.getTime());
+			d.setMonth(d.getMonth() - 12);
+			return d.getTime();
+		}
+
+		async function prefetchInternalRecentViaBx({ maxTime = 60000, maxPages = 500, monthsLimit = 0, onProgress } = {}) {
+			const BXNS = window.BX;
+			const recent = BXNS?.Messenger?.v2?.Service?.LegacyRecentService?.getInstance?.();
+			if (!recent?.loadNextPage) {
+				throw new Error('LegacyRecentService unavailable');
+			}
+
+			const t0 = performance.now();
+			let totalAdded = 0;
+			const cutoffTs = monthsLimit ? calcCutoff12MonthsTs(new Date()) : 0;
+
+			for (let i = 0; i < maxPages; i++) {
+				if ((performance.now() - t0) > maxTime) break;
+				if (recent.isLoading) {
+					await sleep(120);
+					continue;
+				}
+
+				if (cutoffTs) {
+					const oldestBefore = getOldestInternalRecentTs();
+					if (oldestBefore && oldestBefore < cutoffTs) break;
+				}
+
+				const before = countInternalRecentItems();
+				await recent.loadNextPage();
+
+				// Даем DOM шанс дорисовать элементы
+				await sleep(250);
+
+				const after = countInternalRecentItems();
+				const added = Math.max(0, after - before);
+				totalAdded += added;
+				if (typeof onProgress === 'function') onProgress({ added, totalAdded, page: i + 1, before, after });
+
+				// Если за итерацию ничего не добавилось — страницы закончились / не прогрузилось
+				if (added === 0) break;
+
+				// Ограничение на 12 месяцев: остановимся, как только ушли дальше порога
+				if (cutoffTs) {
+					const oldestAfter = getOldestInternalRecentTs();
+					if (oldestAfter && oldestAfter < cutoffTs) break;
+				}
+			}
+
+			return { totalAdded };
+		}
+
+		function findTaskRecentUpdateModelsKey(taskRecent) {
+			if (!taskRecent || typeof taskRecent !== 'object') return '';
+			const seen = new Set();
+			const keys = [];
+			for (let o = taskRecent; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+				for (const key of Object.getOwnPropertyNames(o)) {
+					if (!seen.has(key)) {
+						seen.add(key);
+						keys.push(key);
+					}
+				}
+			}
+			return keys.find((k) => k.toLowerCase().includes('updatemodels')) || '';
+		}
+
+		function formatTsForImRecentTail(ts) {
+			const d = new Date(ts);
+			if (!Number.isFinite(d.getTime())) return '';
+			const pad = (n) => String(n).padStart(2, '0');
+			const offMin = -d.getTimezoneOffset();
+			const sign = offMin >= 0 ? '+' : '-';
+			const abs = Math.abs(offMin);
+			return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+		}
+
+		function getTaskRecentListRoot() {
+			return document.querySelector('.bx-im-list-container-task__elements');
+		}
+
+		function countTaskRecentItems() {
+			try {
+				const root = getTaskRecentListRoot();
+				if (!root) return 0;
+				return root.querySelectorAll('.bx-im-list-recent-item__wrap').length;
+			} catch {
+				return 0;
+			}
+		}
+
+		function getTaskTailCursorFromDom() {
+			try {
+				const root = getTaskRecentListRoot();
+				if (!root) return '';
+				const items = root.querySelectorAll('.bx-im-list-recent-item__wrap');
+				const last = items.length ? items[items.length - 1] : null;
+				if (!last) return '';
+				const label = String(
+					last.querySelector('.bx-im-list-recent-item__date span:last-child')?.textContent ||
+					last.querySelector('.bx-im-list-recent-item__date span')?.textContent ||
+					last.querySelector('.bx-im-list-recent-item__date')?.textContent ||
+					''
+				).trim();
+				const ts = parseBitrixDateLabel(label);
+				if (!ts) return '';
+				return formatTsForImRecentTail(ts);
+			} catch {
+				return '';
+			}
+		}
+
+		function getNextTaskTailLastMessageDate(data) {
+			const arr = data?.recentItems;
+			if (!Array.isArray(arr) || !arr.length) return null;
+			const lastItem = arr[arr.length - 1];
+			return lastItem?.dateLastActivity || lastItem?.dateUpdate || null;
+		}
+
+		async function prefetchTaskRecentViaTailOnce({ onProgress } = {}) {
+			const BXNS = window.BX;
+			const TaskSvc = BXNS?.Messenger?.v2?.Service?.TaskRecentService;
+			if (!TaskSvc) throw new Error('TaskRecentService unavailable');
+
+			let taskRecent;
+			try {
+				taskRecent = typeof TaskSvc.getInstance === 'function' ? TaskSvc.getInstance() : new TaskSvc();
+			} catch (_) {
+				taskRecent = new TaskSvc();
+			}
+
+			const updateKey = findTaskRecentUpdateModelsKey(taskRecent);
+			if (!updateKey || typeof taskRecent[updateKey] !== 'function') {
+				throw new Error('TaskRecentService updateModels not found');
+			}
+
+			const lastMessageDate = anitTaskRecentTailCursor || getTaskTailCursorFromDom();
+			if (!lastMessageDate) {
+				throw new Error('task_recent_tail_no_cursor');
+			}
+
+			const before = countTaskRecentItems();
+
+			const body = new URLSearchParams();
+			body.set('limit', '50');
+			body.set('filter[lastMessageDate]', lastMessageDate);
+			body.set('filter[recentSection]', 'tasksTask');
+			body.set('filter[unread]', 'N');
+			if (BXNS?.bitrix_sessid) body.set('sessid', BXNS.bitrix_sessid());
+
+			const response = await fetch('/bitrix/services/main/ajax.php?action=im.v2.Recent.tail', {
+				method: 'POST',
+				credentials: 'include',
+				headers: {
+					'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+					Accept: 'application/json, text/javascript, */*; q=0.01',
+					'X-Requested-With': 'XMLHttpRequest'
+				},
+				body
+			});
+
+			const json = await response.json().catch(() => null);
+			if (!json || json.status !== 'success') {
+				throw json || new Error('task tail bad response');
+			}
+
+			const data = json.data;
+			await taskRecent[updateKey](data);
+
+			await sleep(250);
+
+			const after = countTaskRecentItems();
+			const added = Math.max(0, after - before);
+
+			const nextDate = getNextTaskTailLastMessageDate(data);
+			if (nextDate && nextDate !== lastMessageDate) {
+				anitTaskRecentTailCursor = nextDate;
+			}
+
+			if (typeof onProgress === 'function') onProgress({ added, before, after });
+
+			return { totalAdded: added };
 		}
 
 
@@ -1868,7 +2092,7 @@
     <div class="actions">
       <button id="anit_apply" class="btn-primary">Применить</button>
       <button id="anit_reset" class="btn-secondary">Сброс</button>
-      ${IS_OL_FRAME ? '' : '<button id="anit_prefetch" class="btn-tertiary">Загрузить все чаты</button>'}
+      ${IS_OL_FRAME ? '' : '<button id="anit_prefetch" class="btn-tertiary">Загрузить ещё</button>'}
     </div>
     <div class="row">
       <span class="muted">(<span class="kbd">Ctrl</span>+<span class="kbd">Alt</span>+<span class="kbd">F</span> — показать/скрыть)</span>
@@ -2847,30 +3071,36 @@
 				btn.disabled = true;
 				btn.textContent = 'Загружаю…';
 
+				if (!isTasksChatsModeNow()) anitTaskRecentTailCursor = null;
 
-				const saved = JSON.parse(JSON.stringify(filters));
+				try {
+					const result = isTasksChatsModeNow()
+						? await prefetchTaskRecentViaTailOnce({
+							onProgress: ({ added }) => {
+								btn.textContent = added ? `+${added}…` : 'Загружаю…';
+							}
+						})
+						: await prefetchInternalRecentViaBx({
+							maxTime: 60000,
+							maxPages: 1,
+							onProgress: ({ totalAdded }) => {
+								btn.textContent = totalAdded ? `+${totalAdded}…` : 'Загружаю…';
+							}
+						});
+					btn.textContent = result.totalAdded ? `+${result.totalAdded}` : 'Нет новых';
+				} catch (e) {
+					warn('Prefetch: догрузка списка недоступна', e);
+					btn.textContent = 'Недоступно';
+				}
 
-
-				filters = defaultFilters();
-				saveFilters();
-				uiFromFilters(host);
-				applyFilters();
-
-
-				await autoScrollWithObserver({ tick: 200, idleLimit: 1500, maxTime: 60000 });
-
-
-				filters = saved;
-				saveFilters();
-				uiFromFilters(host);
-				applyFilters();
+				await sleep(650);
 
 				btn.textContent = origText;
 				btn.disabled = false;
 			} catch (e) {
 				console.error('[ANIT-CHATSORTER] Prefetch error', e);
 				const btn = host.querySelector('#anit_prefetch');
-				if (btn) { btn.disabled = false; btn.textContent = 'Загрузить все чаты'; }
+				if (btn) { btn.disabled = false; btn.textContent = 'Загрузить ещё'; }
 			}
 		});
 
