@@ -19,6 +19,29 @@
     return !api?.isTasksMode?.();
   }
 
+  function hasSafeChatContainer() {
+    const container = api?.findContainer?.();
+    return !!container && container.ownerDocument === document;
+  }
+
+  function waitForSafeChatContainer(timeoutMs = 5000) {
+    const startedAt = Date.now();
+    return new Promise((resolve) => {
+      const tick = () => {
+        if (hasSafeChatContainer()) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          resolve(false);
+          return;
+        }
+        setTimeout(tick, 200);
+      };
+      tick();
+    });
+  }
+
   function cleanupFoldersUi() {
     if (containerObserver) {
       containerObserver.disconnect();
@@ -123,6 +146,7 @@
     escapeHtml,
     isEnabled: isFoldersEnabled,
     api: () => api,
+    findContainer: () => api?.findContainer?.() || null,
     getFolderState: () => FoldersState.get(),
     computeStats: () => FoldersState.computeStats(),
     renderAll: () => renderAll()
@@ -202,6 +226,7 @@
 
   async function boot() {
     api = await waitForApi();
+    if (!await waitForSafeChatContainer()) return;
     await api.refreshFolderState();
     renderAll();
     bindContainerObserver();

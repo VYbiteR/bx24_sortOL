@@ -24,8 +24,16 @@
     return match ? match[0] : '';
   }
 
+  function canUseCurrentDocument() {
+    const container = deps.findContainer?.();
+    if (!container || container.ownerDocument !== document) return false;
+    if (document.designMode === 'on') return false;
+    if (document.body?.isContentEditable) return false;
+    return true;
+  }
 
   function ensureManager() {
+    if (!canUseCurrentDocument()) return null;
     if (managerHost?.isConnected) return managerHost;
 
     const host = document.createElement('div');
@@ -376,6 +384,7 @@
 
   function getManagerElements() {
     const host = ensureManager();
+    if (!host) return {};
     return {
       host,
       subtitle: deps.one(host, '.anit-folder-subtitle'),
@@ -396,6 +405,7 @@
 
   function closeManager() {
     const host = ensureManager();
+    if (!host) return;
     host.style.display = 'none';
     editFolderId = '';
     const { emojiPicker, emojiSearch } = getManagerElements();
@@ -617,6 +627,7 @@
   function openManager() {
     if (!deps.isEnabled()) return;
     const host = ensureManager();
+    if (!host) return;
     host.style.display = 'block';
     setFormState(null);
     renderManager();
@@ -624,6 +635,7 @@
 
   function bindEvents() {
     const { host } = getManagerElements();
+    if (!host) return;
     if (host.dataset.actionsBound === '1') return;
     host.dataset.actionsBound = '1';
 
