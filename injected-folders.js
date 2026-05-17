@@ -14,6 +14,7 @@
   let containerObserver = null;
   let rootObserver = null;
   let observedContainer = null;
+  let foldersUiActivated = false;
 
   function isFoldersEnabled() {
     return !api?.isTasksMode?.();
@@ -188,6 +189,10 @@
     const root = document.body || document.documentElement;
     if (!root) return;
     rootObserver = new MutationObserver(() => {
+      if (!foldersUiActivated && hasSafeChatContainer()) {
+        activateFoldersUi().catch(() => {});
+        return;
+      }
       const nextContainer = api?.findContainer?.() || null;
       const needsRebind = nextContainer !== observedContainer;
       const barDetached = FolderBarView.isDetached();
@@ -224,17 +229,24 @@
     });
   }
 
-  async function boot() {
-    api = await waitForApi();
-    if (!await waitForSafeChatContainer()) return;
+  async function activateFoldersUi() {
+    if (foldersUiActivated || !hasSafeChatContainer()) return;
+    foldersUiActivated = true;
     await api.refreshFolderState();
     renderAll();
     bindContainerObserver();
-    bindRootObserver();
     FolderManagerView.bindEvents();
 
     window.addEventListener('ANIT_BXCS_FOLDERS_UPDATED', FolderBarView.scheduleRender);
     window.addEventListener('ANIT_BXCS_OPEN_FOLDER_MANAGER', FolderManagerView.open);
+  }
+
+  async function boot() {
+    api = await waitForApi();
+    bindRootObserver();
+    if (await waitForSafeChatContainer()) {
+      await activateFoldersUi();
+    }
   }
 
   boot().catch(() => {});
