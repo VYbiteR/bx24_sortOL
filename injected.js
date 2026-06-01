@@ -18,10 +18,11 @@
 
 	const IS_FRAME = self !== top;
 	const qs = new URLSearchParams(location.search || '');
-	const IS_OL_FRAME =
+	const IS_OL_BOOT_HINT =
 	IS_FRAME &&
 	/\/desktop_app\/\?/i.test(location.href) &&
 	(qs.get('IM_LINES') === 'Y' || /IM_LINES=Y/i.test(location.href));
+	let IS_OL_FRAME = IS_OL_BOOT_HINT;
 	let multiSelectMode = false;
 	let multiSelectedIds = new Set();
 	let multiRmbTimer = null;
@@ -109,6 +110,45 @@
 		return isInternalRecentDOM() || isInternalTaskDOM();
 	}
 
+	const OLD_OL_ITEM_SELECTOR = '.bx-messenger-cl-item';
+	const NEW_OL_ITEM_SELECTOR = '.bx-imol-list-recent__item';
+	const OL_ITEM_SELECTOR = `${OLD_OL_ITEM_SELECTOR}, ${NEW_OL_ITEM_SELECTOR}`;
+
+	function isVisibleNode(node) {
+		if (!node || !node.isConnected) return false;
+		try {
+			const style = getComputedStyle(node);
+			if (style.display === 'none' || style.visibility === 'hidden') return false;
+			return node.getClientRects().length > 0;
+		} catch (_) {
+			return false;
+		}
+	}
+
+	function findVisibleCandidate(selectors) {
+		const candidates = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
+		return candidates.find(isVisibleNode) || candidates[0] || null;
+	}
+
+	function isOlDOM() {
+		return !!findVisibleCandidate([
+			'.bx-messenger-recent-wrap.bx-messenger-recent-lines-wrap .bx-messenger-cl-item',
+			'.bx-imol-list-recent__scroll-container .bx-imol-list-recent__item',
+			'.bx-imol-list-container-recent__elements .bx-imol-list-recent__item'
+		]);
+	}
+
+	function isOlModeNow() {
+		return IS_OL_BOOT_HINT || isOlDOM();
+	}
+
+	function refreshCurrentModeFromDOM() {
+		const next = isOlModeNow();
+		if (IS_OL_FRAME === next) return false;
+		IS_OL_FRAME = next;
+		return true;
+	}
+
 	function findContainerInternal() {
 
 		const taskList = document.querySelector('.bx-im-list-container-task__elements');
@@ -119,11 +159,15 @@
 
 
 	function findContainerOL() {
-	return document.querySelector('.bx-messenger-recent-wrap.bx-messenger-recent-lines-wrap');
+	return findVisibleCandidate([
+		'.bx-messenger-recent-wrap.bx-messenger-recent-lines-wrap',
+		'.bx-imol-list-recent__scroll-container',
+		'.bx-imol-list-container-recent__elements'
+	]);
 }
 
 	function findContainer() {
-	if (IS_OL_FRAME) return findContainerOL();
+	if (isOlModeNow()) return findContainerOL();
 	if (isInternalChatsDOM()) return findContainerInternal();
 	return null;
 }
@@ -305,13 +349,13 @@
 	function armDomRetroGate() {
 	if (!IS_OL_FRAME) return;
 	const c = findContainerOL();
-	if (c && c.querySelector('.bx-messenger-cl-item')) openGate('dom-retro', location.href);
+	if (c && c.querySelector(OL_ITEM_SELECTOR)) openGate('dom-retro', location.href);
 	requestAnimationFrame(() => {
 	const cc = findContainerOL();
-	if (cc && cc.querySelector('.bx-messenger-cl-item')) openGate('dom-retro-rAF', location.href);
+	if (cc && cc.querySelector(OL_ITEM_SELECTOR)) openGate('dom-retro-rAF', location.href);
 	else setTimeout(() => {
 	const ccc = findContainerOL();
-	if (ccc && ccc.querySelector('.bx-messenger-cl-item')) openGate('dom-retro-timeout', location.href);
+	if (ccc && ccc.querySelector(OL_ITEM_SELECTOR)) openGate('dom-retro-timeout', location.href);
 }, 250);
 });
 }
@@ -702,11 +746,20 @@
 
 	const normId = (raw) => normalizeDialogId(raw);
 
+	function getOlChatIdFromElement(el) {
+		return normId(
+			el?.getAttribute?.('data-userid') ||
+			el?.dataset?.userid ||
+			el?.getAttribute?.('contextdialogid') ||
+			el?.querySelector?.('[contextdialogid]')?.getAttribute?.('contextdialogid')
+		);
+	}
+
 		function getChatItemElement(target) {
 			if (!target) return null;
 
 			if (IS_OL_FRAME) {
-				const el = target.closest?.('.bx-messenger-cl-item');
+				const el = target.closest?.(OL_ITEM_SELECTOR);
 				if (el) return el;
 			}
 
@@ -722,7 +775,7 @@
 
 			if (IS_OL_FRAME) {
 
-				return normId(el.getAttribute('data-userid') || el.dataset.userid);
+				return getOlChatIdFromElement(el);
 			}
 
 
@@ -861,6 +914,25 @@
 	function buildOlGroupDateMap(container) {
 		const map = new Map();
 		if (!container) return map;
+		if (isNewOlLayoutContainer(container)) {
+			container.querySelectorAll('.bx-imol-list-recent__group-item_container').forEach((statusGroup) => {
+				const groupName = statusGroup.querySelector(':scope > .bx-imol-list-recent__group_name');
+				const groupClass = String(groupName?.className || '');
+				const groupStatusByClass = /answered/i.test(groupClass) ? 40 : (/work/i.test(groupClass) ? 20 : 0);
+				const groupText = normalizeTextMaybeUtf8Mojibake((groupName?.textContent || '').trim()).toLowerCase();
+				const groupStatus = /answered|РѕС‚РІРµС‡/i.test(groupText) ? 40 : (/work|СЂР°Р±РѕС‚/i.test(groupText) ? 20 : 0);
+				statusGroup.querySelectorAll(':scope > div').forEach((dateGroup) => {
+					const dateTitle = dateGroup.querySelector(':scope > .bx-imol-list-recent__date-group_name');
+					const currentTs = parseBitrixDateLabel(dateTitle?.textContent || '');
+					dateGroup.querySelectorAll('.bx-imol-list-recent__item').forEach((item) => {
+						if ((groupStatusByClass || groupStatus) && !item.dataset.anitOlStatus) item.dataset.anitOlStatus = String(groupStatusByClass || groupStatus);
+						const id = getOlChatIdFromElement(item);
+						if (id) map.set(id, currentTs);
+					});
+				});
+			});
+			return map;
+		}
 		let currentTs = 0;
 		for (const node of Array.from(container.children || [])) {
 			if (node.matches?.('.bx-messenger-recent-group')) {
@@ -868,7 +940,7 @@
 				continue;
 			}
 			if (!node.matches?.('.bx-messenger-cl-item')) continue;
-			const id = normId(node.getAttribute('data-userid') || node.dataset.userid);
+			const id = getOlChatIdFromElement(node);
 			if (id) map.set(id, currentTs);
 		}
 		return map;
@@ -931,17 +1003,131 @@
 	const w = RU_DAYS_SHORT[d.getDay()];
 	return `${w}, ${d.getDate()} ${RU_MONTHS_GEN[d.getMonth()]}`;
 }
+
+	function isNewOlLayoutContainer(container = findContainerOL()) {
+	return !!(
+		container &&
+		(
+			container.classList?.contains('bx-imol-list-recent__scroll-container') ||
+			container.classList?.contains('bx-imol-list-container-recent__elements') ||
+			container.querySelector?.('.bx-imol-list-recent__item')
+		)
+	);
+}
+
+	function updateNewOlGroupVisibility(container) {
+	if (!isNewOlLayoutContainer(container)) return;
+	container.querySelectorAll('.bx-imol-list-recent__date-group_name').forEach((dateNode) => {
+		const group = dateNode.parentElement;
+		if (!group) return;
+		const hasVisible = Array.from(group.querySelectorAll('.bx-imol-list-recent__item'))
+			.some((item) => item.style.display !== 'none');
+		group.style.display = hasVisible ? '' : 'none';
+	});
+	container.querySelectorAll('.bx-imol-list-recent__group-item_container').forEach((group) => {
+		const hasVisible = Array.from(group.querySelectorAll('.bx-imol-list-recent__item'))
+			.some((item) => item.style.display !== 'none');
+		group.style.display = hasVisible || group.querySelector('[data-anit-new-ol-date-group="1"]') ? '' : 'none';
+		group.querySelectorAll(':scope > .bx-imol-list-recent__group_name').forEach((groupName) => {
+			groupName.style.display = 'none';
+		});
+	});
+}
+
+	function hasAnitNewOlDateWrappers(container) {
+	return !!container?.querySelector?.('[data-anit-new-ol-date-group="1"]');
+}
+
+	function getNewOlItemDateTs(el, tsMap) {
+	const id = getOlChatIdFromElement(el);
+	return tsMap?.get?.(id) || olGroupDateFallback.get(id) || 0;
+}
+
+	function rebuildNewOlLayout(container, tsMap, reason) {
+	if (!isNewOlLayoutContainer(container)) return false;
+	const groups = Array.from(container.querySelectorAll('.bx-imol-list-recent__group-item_container'));
+	if (!groups.length) return false;
+
+	olGroupDateFallback = buildOlGroupDateMap(container);
+	const rootGroup = groups[0];
+	const allItems = groups.flatMap((group) => Array.from(group.querySelectorAll('.bx-imol-list-recent__item')));
+	const currentIndex = new Map(allItems.map((el, index) => [el, index]));
+	allItems.sort((a, b) => {
+		const aId = getOlChatIdFromElement(a);
+		const bId = getOlChatIdFromElement(b);
+		const ta = getNewOlItemDateTs(a, tsMap);
+		const tb = getNewOlItemDateTs(b, tsMap);
+		if (ta !== tb) return tb - ta;
+		const ra = rankMap.has(aId) ? rankMap.get(aId) : 1e9;
+		const rb = rankMap.has(bId) ? rankMap.get(bId) : 1e9;
+		if (ra !== rb) return ra - rb;
+		return (currentIndex.get(a) ?? 0) - (currentIndex.get(b) ?? 0);
+	});
+
+	const desiredSig = allItems.map((el) => {
+		const id = getOlChatIdFromElement(el);
+		return `${id}@${dateKey(getNewOlItemDateTs(el, tsMap))}`;
+	}).join('|');
+	if (desiredSig === lastOrderSig && hasAnitNewOlDateWrappers(container)) {
+		updateNewOlGroupVisibility(container);
+		log('rebuild ok.', { total: allItems.length, source: tsMap?.size ? 'rest' : 'dom', reason, layout: 'new-ol', unchanged: true });
+		return true;
+	}
+
+	muteOlObserverTick();
+	for (const group of groups) {
+		const groupName = group.querySelector(':scope > .bx-imol-list-recent__group_name');
+		if (groupName) groupName.style.display = 'none';
+		group.style.display = group === rootGroup ? '' : 'none';
+		Array.from(group.children || []).forEach((node) => {
+			if (node === groupName) return;
+			node.remove();
+		});
+	}
+
+	const newIds = [];
+	let currentKey = null;
+	let currentWrap = null;
+	for (const item of allItems) {
+		const id = getOlChatIdFromElement(item);
+		newIds.push(id);
+		const ts = getNewOlItemDateTs(item, tsMap);
+		const key = dateKey(ts);
+		if (key !== currentKey) {
+			currentWrap = document.createElement('div');
+			currentWrap.dataset.anitNewOlDateGroup = '1';
+			const dateTitle = document.createElement('div');
+			dateTitle.className = 'bx-imol-list-recent__date-group_name';
+			dateTitle.textContent = formatGroupTitleFromTS(ts);
+			currentWrap.appendChild(dateTitle);
+			rootGroup.appendChild(currentWrap);
+			currentKey = key;
+		}
+		currentWrap.appendChild(item);
+	}
+
+	lastOrderSig = desiredSig;
+	rankMap = new Map(newIds.map((id, index) => [id, index]));
+	frozenSetSig = currentSetSignature(newIds);
+	log('rebuild ok.', { total: newIds.length, source: tsMap?.size ? 'rest' : 'dom', reason, layout: 'new-ol' });
+	return true;
+}
+
 	function rebuildDateGroups(tsMap) {
 	if (!IS_OL_FRAME) return;
 	const container = findContainerOL();
 	if (!container) return;
+	if (isNewOlLayoutContainer(container)) {
+		updateNewOlGroupVisibility(container);
+		return;
+	}
 	muteOlObserverTick();
 	container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
 	const items = Array.from(container.querySelectorAll('.bx-messenger-cl-item'))
 	.filter(el => el.style.display !== 'none');
 	let lastKey = null;
 	for (const el of items) {
-	const id = (el.getAttribute('data-userid') || el.dataset.userid || '').toLowerCase();
+	const id = getOlChatIdFromElement(el);
 	const ts = tsMap?.get?.(id) ?? -1;
 	const key = dateKey(ts);
 	if (key !== lastKey) {
@@ -1243,11 +1429,22 @@
 		}
 
 		function getItemMetaOL(el) {
-	const id = normId(el.getAttribute('data-userid') || el.dataset.userid);
-	const status = parseInt(el.getAttribute('data-status') || el.dataset.status || '0', 10) || 0;
-	const hasUnread = !!el.querySelector('.bx-messenger-cl-count-digit');
-	const lastText = normalizeTextMaybeUtf8Mojibake((el.querySelector('.bx-messenger-cl-user-desc')?.textContent || '').trim()).toLowerCase();
-	const title = normalizeTextMaybeUtf8Mojibake((el.querySelector('.bx-messenger-cl-user-title')?.textContent || '').trim()).toLowerCase();
+	const id = getOlChatIdFromElement(el);
+	const status = parseInt(el.getAttribute('data-status') || el.dataset.status || el.dataset.anitOlStatus || '0', 10) || 0;
+	const counterText = el.querySelector('.bx-imol-list-recent-item__counter_container')?.textContent || '';
+	const hasUnread = !!el.querySelector('.bx-messenger-cl-count-digit, .bx-imol-list-recent-item__counter_number, .bx-imol-list-recent-item__counter_container [class*="counter"]') || /\d+/.test(counterText);
+	const lastText = normalizeTextMaybeUtf8Mojibake((
+		el.querySelector('.bx-messenger-cl-user-desc')?.textContent ||
+		el.querySelector('.bx-imol-list-recent-item__message_text')?.textContent ||
+		''
+	).trim()).toLowerCase();
+	const title = normalizeTextMaybeUtf8Mojibake((
+		el.querySelector('.bx-messenger-cl-user-title')?.textContent ||
+		el.querySelector('.bx-im-chat-title__text')?.getAttribute('title') ||
+		el.querySelector('.bx-im-chat-title__text')?.textContent ||
+		el.querySelector('[contextdialogid]')?.getAttribute('title') ||
+		''
+	).trim()).toLowerCase();
 	const cls = el.className || '';
 	const isWhatsApp = /-wz_whatsapp_/i.test(cls);
 	const isTelegram = /-wz_telegram_/i.test(cls);
@@ -1488,11 +1685,13 @@
 	if (IS_OL_FRAME) {
 		muteOlObserverTick();
 		olGroupDateFallback = buildOlGroupDateMap(container);
-		container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
+		if (!isNewOlLayoutContainer(container)) {
+			container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
+		}
 	}
 
 	const items = IS_OL_FRAME
-	? Array.from(container.querySelectorAll('.bx-messenger-cl-item'))
+	? Array.from(container.querySelectorAll(OL_ITEM_SELECTOR))
 	: Array.from(container.querySelectorAll('.bx-im-list-recent-item__wrap'));
 
 	for (const el of items) {
@@ -1520,7 +1719,10 @@
 		container.appendChild(frag);
 	}
 	try { renderFolderFilterTabs(filtersHost); } catch (_) {}
-	if (IS_OL_FRAME) rebuildDateGroups((tsMapOnce && tsMapOnce.size) ? tsMapOnce : olGroupDateFallback);
+	if (IS_OL_FRAME) {
+		if (isNewOlLayoutContainer(container)) updateNewOlGroupVisibility(container);
+		else rebuildDateGroups((tsMapOnce && tsMapOnce.size) ? tsMapOnce : olGroupDateFallback);
+	}
 }
 
 
@@ -3203,12 +3405,17 @@
 
 	const tsMapLocal = opts.tsMap || tsMapOnce || new Map();
 	muteOlObserverTick();
+	if (isNewOlLayoutContainer(container)) {
+		rebuildNewOlLayout(container, tsMapLocal, reason);
+		applyFilters();
+		return;
+	}
 	container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
 
 	const items = Array.from(container.querySelectorAll('.bx-messenger-cl-item'));
 	if (!items.length) { applyFilters(); return; }
 
-	const ids = items.map(el => normId(el.getAttribute('data-userid') || el.dataset.userid));
+	const ids = items.map(el => getOlChatIdFromElement(el));
 	const setSig = currentSetSignature(ids);
 	const orderSigNow = currentOrderSignature(ids);
 
@@ -3217,7 +3424,7 @@
 		const shouldBe = Array.from(ids).sort((a, b) => (rankMap.get(a) ?? 1e9) - (rankMap.get(b) ?? 1e9));
 		const wantedSig = currentOrderSignature(shouldBe);
 		if (orderSigNow !== wantedSig) {
-			const mapById = new Map(items.map(el => [normId(el.getAttribute('data-userid') || el.dataset.userid), el]));
+			const mapById = new Map(items.map(el => [getOlChatIdFromElement(el), el]));
 			const frag = document.createDocumentFragment();
 			for (const id of shouldBe) { const el = mapById.get(id); if (el) frag.appendChild(el); }
 			container.appendChild(frag);
@@ -3231,8 +3438,8 @@
 
 	const currentIndex = new Map(items.map((el, i) => [el, i]));
 	items.sort((a, b) => {
-		const aId = normId(a.getAttribute('data-userid') || a.dataset.userid);
-		const bId = normId(b.getAttribute('data-userid') || b.dataset.userid);
+		const aId = getOlChatIdFromElement(a);
+		const bId = getOlChatIdFromElement(b);
 		const ta = tsMapLocal.get(aId) ?? -1;
 		const tb = tsMapLocal.get(bId) ?? -1;
 		if (ta !== tb) return tb - ta;
@@ -3242,7 +3449,7 @@
 		return (currentIndex.get(a) ?? 0) - (currentIndex.get(b) ?? 0);
 	});
 
-	const newIds = items.map(el => normId(el.getAttribute('data-userid') || el.dataset.userid));
+	const newIds = items.map(el => getOlChatIdFromElement(el));
 	const newOrderSig = currentOrderSignature(newIds);
 	if (newOrderSig !== orderSigNow) {
 		muteOlObserverTick();
@@ -3266,7 +3473,7 @@
 		if (obs) obs.disconnect();
 
 		// Ignore synthetic group headers in OL, otherwise observer reacts to our own rebuilds.
-		const itemSel = IS_OL_FRAME ? '.bx-messenger-cl-item' : '.bx-im-list-recent-item__wrap';
+		const itemSel = IS_OL_FRAME ? OL_ITEM_SELECTOR : '.bx-im-list-recent-item__wrap';
 
 	obs = new MutationObserver((mutations) => {
 		if (IS_OL_FRAME && suppressOlObserver) return;
@@ -3311,22 +3518,54 @@
 
 
 	let routeObs = null;
+	let routeOlInitPromise = null;
+	async function ensureOlRouteInitialized(reason = 'route-ol') {
+	if (!IS_OL_FRAME || !findContainerOL()) return;
+	const pane = document.getElementById('anit-filters');
+	if (pane?.dataset.mode === 'ol' && routeOlInitPromise) return routeOlInitPromise;
+	if (routeOlInitPromise) return routeOlInitPromise;
+	routeOlInitPromise = (async () => {
+		try {
+			if (pane && pane.dataset.mode !== 'ol') {
+				pane.remove();
+				filtersHost = null;
+			}
+			if (!document.getElementById('anit-filters')) {
+				try { await buildFiltersPanel(); } catch (e) { warn('filters panel build skipped:', e?.message || e); }
+			}
+			try { await refreshFolderStateFromExtension(); } catch (_) {}
+			try { tsMapOnce = await getRecentTsMap().catch(() => new Map()); } catch (_) {}
+			await rebuildList(reason, { tsMap: tsMapOnce });
+			armObserver();
+		} finally {
+			routeOlInitPromise = null;
+		}
+	})();
+	return routeOlInitPromise;
+}
 	function armRouteObserverIfNeeded() {
-	if (IS_OL_FRAME) return;
 	if (routeObs) return;
 	routeObs = new MutationObserver(() => {
+	const modeChanged = refreshCurrentModeFromDOM();
+	if (IS_OL_FRAME) {
+		const pane = document.getElementById('anit-filters');
+		if (modeChanged || !pane || pane.dataset.mode !== 'ol') {
+			ensureOlRouteInitialized('route-ol');
+		}
+		return;
+	}
 	const onChats = isInternalChatsDOM();
 	const havePanel = !!document.getElementById('anit-filters');
 	const needMode = getPanelModeKey();
 	if (onChats) ensureFiltersMode(needMode);
 	if (onChats && !havePanel) {
-	buildFiltersPanel().then(applyFilters);
+	buildFiltersPanel().then(() => { applyFilters(); armObserver(); });
 } else if (onChats && havePanel) {
 	const pane = document.getElementById('anit-filters');
 	if (pane && pane.dataset.mode !== needMode) {
 		pane.remove();
 		filtersHost = null;
-		buildFiltersPanel().then(applyFilters);
+		buildFiltersPanel().then(() => { applyFilters(); armObserver(); });
 	}
 } else if (!onChats && havePanel) {
 	document.getElementById('anit-filters')?.remove();
@@ -3364,6 +3603,7 @@
 	await waitForBody(5000).catch(() => {});
 
 	await waitForContainer(5000).catch(() => {});
+	refreshCurrentModeFromDOM();
 
 	if (IS_OL_FRAME) {
 	try { await buildFiltersPanel(); } catch (e) { warn('filters panel build skipped:', e?.message || e); }
@@ -3371,6 +3611,7 @@
 	armRouteObserverIfNeeded();
 	try { await buildFiltersPanel(); } catch {}
 }
+	armRouteObserverIfNeeded();
 	armFolderBridgeListener();
 	try { await refreshFolderStateFromExtension(); } catch (_) {}
 

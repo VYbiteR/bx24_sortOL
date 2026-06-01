@@ -81,7 +81,7 @@
     const container = api?.findContainer?.();
     if (!container) return [];
     return api.isOlMode()
-      ? Array.from(container.querySelectorAll('.bx-messenger-cl-item'))
+      ? Array.from(container.querySelectorAll('.bx-messenger-cl-item, .bx-imol-list-recent__item'))
       : Array.from(container.querySelectorAll('.bx-im-list-recent-item__wrap'));
   }
 
