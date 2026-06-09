@@ -765,10 +765,48 @@
 		);
 	}
 
+	function getMutationElementTarget(mutation) {
+		const target = mutation?.target;
+		if (!target) return null;
+		return target.nodeType === 1 ? target : target.parentElement;
+	}
+
+	function isOlItemMutation(mutation) {
+		const target = getMutationElementTarget(mutation);
+		if (!target) return false;
+		const item = target.matches?.(OL_ITEM_SELECTOR) ? target : target.closest?.(OL_ITEM_SELECTOR);
+		if (!item) return false;
+		if (mutation.type === 'attributes' && mutation.attributeName === 'data-anit-own-ol-mutation') return false;
+		if (
+			suppressOlObserver &&
+			mutation.type === 'attributes' &&
+			[
+				'style',
+				'data-anit-ol-status',
+				'data-anit-ol-duplicate',
+				'data-anit-ol-date-key'
+			].includes(mutation.attributeName) &&
+			(
+				item.dataset?.anitOwnOlMutation === '1' ||
+				!!target.closest?.('[data-anit-own-ol-mutation="1"]')
+			)
+		) return false;
+		return true;
+	}
+
+	function clearOwnOlMutationMarkers() {
+		try {
+			document.querySelectorAll('[data-anit-own-ol-mutation="1"]').forEach((node) => {
+				try { delete node.dataset.anitOwnOlMutation; } catch (_) {}
+			});
+		} catch (_) {}
+	}
+
 	function clearOwnOlMutationSoon() {
 		if (!ownOlMutationDepth) return;
 		if (suppressOlObserverTimer) clearTimeout(suppressOlObserverTimer);
 		suppressOlObserverTimer = setTimeout(() => {
+			clearOwnOlMutationMarkers();
 			ownOlMutationDepth = 0;
 			suppressOlObserver = false;
 			suppressOlObserverTimer = null;
@@ -955,8 +993,9 @@
 				statusGroup.querySelectorAll(':scope > div').forEach((dateGroup) => {
 					const dateTitle = dateGroup.querySelector(':scope > .bx-imol-list-recent__date-group_name');
 					const currentTs = parseBitrixDateLabel(dateTitle?.textContent || '');
+					const isAnitDateGroup = dateGroup.dataset?.anitNewOlDateGroup === '1';
 					dateGroup.querySelectorAll('.bx-imol-list-recent__item').forEach((item) => {
-						if ((groupStatusByClass || groupStatus) && !item.dataset.anitOlStatus) item.dataset.anitOlStatus = String(groupStatusByClass || groupStatus);
+						if ((groupStatusByClass || groupStatus) && !isAnitDateGroup) item.dataset.anitOlStatus = String(groupStatusByClass || groupStatus);
 						const id = getOlChatIdFromElement(item);
 						if (id) map.set(id, Math.max(map.get(id) || 0, currentTs || 0));
 					});
@@ -1046,19 +1085,54 @@
 	);
 }
 
+	function getNewOlScrollContainer(container) {
+	return container?.classList?.contains('bx-imol-list-recent__scroll-container')
+		? container
+		: container?.querySelector?.('.bx-imol-list-recent__scroll-container');
+}
+
+	function ensureNewOlCssLayout(container) {
+	const scroll = getNewOlScrollContainer(container);
+	if (!scroll) return null;
+	scroll.classList.add('anit-new-ol-css-sort');
+	if (!document.getElementById('anit-new-ol-css-sort-style')) {
+		const style = document.createElement('style');
+		style.id = 'anit-new-ol-css-sort-style';
+		style.textContent = `
+.anit-new-ol-css-sort { display: flex !important; flex-direction: column !important; }
+.anit-new-ol-css-sort > .bx-imol-list-recent__group-item_container { display: contents !important; }
+.anit-new-ol-css-sort > .bx-imol-list-recent__group-item_container > div { display: contents !important; }
+.anit-new-ol-css-sort .bx-imol-list-recent__group_name,
+.anit-new-ol-css-sort .bx-imol-list-recent__date-group_name { display: none !important; }
+.anit-new-ol-css-sort .anit-new-ol-virtual-date {
+	display: block;
+	padding: 6px 14px 4px;
+	color: var(--ui-color-text-subtle, #828b95);
+	font: 11px/1.3 var(--ui-font-family-primary, system-ui);
+	text-transform: none;
+}
+`;
+		document.head.appendChild(style);
+	}
+	return scroll;
+}
+
 	function updateNewOlGroupVisibility(container) {
 	if (!isNewOlLayoutContainer(container)) return;
-	container.querySelectorAll('.bx-imol-list-recent__date-group_name').forEach((dateNode) => {
-		const group = dateNode.parentElement;
-		if (!group) return;
-		const hasVisible = Array.from(group.querySelectorAll('.bx-imol-list-recent__item'))
-			.some((item) => item.style.display !== 'none');
-		group.style.display = hasVisible ? '' : 'none';
+	const scroll = ensureNewOlCssLayout(container);
+	if (!scroll) return;
+	const visibleDateKeys = new Set();
+	container.querySelectorAll('.bx-imol-list-recent__item').forEach((item) => {
+		if (item.style.display === 'none') return;
+		if (item.dataset?.anitOlDuplicate === '1') return;
+		const key = item.dataset?.anitOlDateKey || '';
+		if (key) visibleDateKeys.add(key);
+	});
+	scroll.querySelectorAll('.anit-new-ol-virtual-date').forEach((header) => {
+		header.style.display = visibleDateKeys.has(header.dataset.anitOlDateKey || '') ? '' : 'none';
 	});
 	container.querySelectorAll('.bx-imol-list-recent__group-item_container').forEach((group) => {
-		const hasVisible = Array.from(group.querySelectorAll('.bx-imol-list-recent__item'))
-			.some((item) => item.style.display !== 'none');
-		group.style.display = hasVisible || group.querySelector('[data-anit-new-ol-date-group="1"]') ? '' : 'none';
+		group.style.display = '';
 		group.querySelectorAll(':scope > .bx-imol-list-recent__group_name').forEach((groupName) => {
 			groupName.style.display = 'none';
 		});
@@ -1096,11 +1170,12 @@
 
 	function rebuildNewOlLayout(container, tsMap, reason) {
 	if (!isNewOlLayoutContainer(container)) return false;
+	const scroll = ensureNewOlCssLayout(container);
+	if (!scroll) return false;
 	const groups = Array.from(container.querySelectorAll('.bx-imol-list-recent__group-item_container'));
 	if (!groups.length) return false;
 
 	olGroupDateFallback = buildOlGroupDateMap(container);
-	const rootGroup = groups[0];
 	const rawItems = groups.flatMap((group) => Array.from(group.querySelectorAll('.bx-imol-list-recent__item')));
 	const allItems = uniqueNewOlItems(rawItems);
 	const currentIndex = new Map(rawItems.map((el, index) => [el, index]));
@@ -1120,61 +1195,60 @@
 		const id = getOlChatIdFromElement(el);
 		return `${id}@${dateKey(getNewOlItemDateTs(el, tsMap))}`;
 	}).join('|');
-	if (desiredSig === lastOrderSig && hasAnitNewOlDateWrappers(container)) {
-		if (rawItems.length !== allItems.length) {
-			muteOlObserverTick();
-			const keep = new Set(allItems);
-			rawItems.forEach((item) => {
-				if (!keep.has(item)) {
-					markOwnOlNode(item);
-					item.remove();
-				}
-			});
-			clearOwnOlMutationSoon();
-		}
-		updateNewOlGroupVisibility(container);
-		log('rebuild ok.', { total: allItems.length, source: tsMap?.size ? 'rest' : 'dom', reason, layout: 'new-ol', unchanged: true });
-		return true;
-	}
 
 	muteOlObserverTick();
-	for (const group of groups) {
-		const groupName = group.querySelector(':scope > .bx-imol-list-recent__group_name');
-		if (groupName) groupName.style.display = 'none';
-		group.style.display = group === rootGroup ? '' : 'none';
-		Array.from(group.children || []).forEach((node) => {
-			if (node === groupName) return;
-			markOwnOlNode(node);
-			node.remove();
+	scroll.querySelectorAll('.anit-new-ol-virtual-date').forEach((node) => {
+		markOwnOlNode(node);
+		node.remove();
+	});
+	groups.forEach((group) => {
+		group.style.display = '';
+		group.querySelectorAll(':scope > .bx-imol-list-recent__group_name').forEach((groupName) => {
+			groupName.style.display = 'none';
 		});
-	}
+	});
+	rawItems.forEach((item) => {
+		markOwnOlNode(item);
+		item.dataset.anitOlDuplicate = '1';
+		item.style.order = '';
+		delete item.dataset.anitOlDateKey;
+	});
 
 	const newIds = [];
 	let currentKey = null;
-	let currentWrap = null;
-	for (const item of allItems) {
+	allItems.forEach((item, index) => {
 		const id = getOlChatIdFromElement(item);
 		newIds.push(id);
 		const ts = getNewOlItemDateTs(item, tsMap);
 		const key = dateKey(ts);
 		if (key !== currentKey) {
-			currentWrap = document.createElement('div');
-			currentWrap.dataset.anitNewOlDateGroup = '1';
-			markOwnOlNode(currentWrap);
-			const dateTitle = document.createElement('div');
-			dateTitle.className = 'bx-imol-list-recent__date-group_name';
-			dateTitle.textContent = formatGroupTitleFromTS(ts);
-			currentWrap.appendChild(dateTitle);
-			rootGroup.appendChild(currentWrap);
+			const header = document.createElement('div');
+			header.className = 'anit-new-ol-virtual-date';
+			header.dataset.anitOlDateKey = key;
+			header.textContent = formatGroupTitleFromTS(ts);
+			header.style.order = String(index * 2);
+			markOwnOlNode(header);
+			scroll.appendChild(header);
 			currentKey = key;
 		}
-		currentWrap.appendChild(item);
-	}
+		markOwnOlNode(item);
+		delete item.dataset.anitOlDuplicate;
+		item.dataset.anitOlDateKey = key;
+		item.style.order = String(index * 2 + 1);
+	});
+	rawItems.forEach((item) => {
+		if (item.dataset.anitOlDuplicate === '1') {
+			markOwnOlNode(item);
+			item.style.display = 'none';
+			item.style.order = '999999';
+		}
+	});
 
 	lastOrderSig = desiredSig;
 	rankMap = new Map(newIds.map((id, index) => [id, index]));
 	frozenSetSig = currentSetSignature(newIds);
-	log('rebuild ok.', { total: newIds.length, source: tsMap?.size ? 'rest' : 'dom', reason, layout: 'new-ol' });
+	updateNewOlGroupVisibility(container);
+	log('rebuild ok.', { total: newIds.length, source: tsMap?.size ? 'rest' : 'dom', reason, layout: 'new-ol-css' });
 	clearOwnOlMutationSoon();
 	return true;
 }
@@ -1772,7 +1846,9 @@
 
 	for (const el of items) {
 	const meta = getItemMeta(el);
-	el.style.display = matchByFilters(meta) ? '' : 'none';
+	const isHiddenDuplicate = IS_OL_FRAME && isNewOlLayoutContainer(container) && el.dataset?.anitOlDuplicate === '1';
+	if (IS_OL_FRAME && isNewOlLayoutContainer(container)) markOwnOlNode(el);
+	el.style.display = !isHiddenDuplicate && matchByFilters(meta) ? '' : 'none';
 }
 	if (!IS_OL_FRAME && !isTasksChatsModeNow() && window.__anitProjectLookup && (filters.sortMode === 'project' || filters.sortMode === 'projectName')) {
 		const visible = items.filter(el => el.style.display !== 'none');
@@ -3584,6 +3660,9 @@
 			return !isOwnOlNode(n);
 		})) { need = true; break; }
 		}
+		if (IS_OL_FRAME && (m.type === 'attributes' || m.type === 'characterData')) {
+			if (isOlItemMutation(m)) { need = true; break; }
+		}
 	}
 	if (!need) return;
 	if (IS_OL_FRAME) {
@@ -3603,7 +3682,12 @@
 }, 80);
 });
 
-	obs.observe(container, { childList: true, subtree: true });
+	obs.observe(
+		container,
+		IS_OL_FRAME
+			? { childList: true, subtree: true, attributes: true, characterData: true }
+			: { childList: true, subtree: true }
+	);
 	log('observeContainer: подписан на DOM изменения');
 }
 
