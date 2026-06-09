@@ -734,11 +734,42 @@
 
 	let suppressOlObserver = false;
 	let suppressOlObserverTimer = null;
+	let ownOlMutationDepth = 0;
+	const OWN_OL_MUTATION_TTL_MS = 500;
 	function muteOlObserverTick() {
 		if (!IS_OL_FRAME) return;
-		suppressOlObserver = true;
+		ownOlMutationDepth += 1;
+		suppressOlObserver = ownOlMutationDepth > 0;
 		if (suppressOlObserverTimer) clearTimeout(suppressOlObserverTimer);
 		suppressOlObserverTimer = setTimeout(() => {
+			ownOlMutationDepth = 0;
+			suppressOlObserver = false;
+			suppressOlObserverTimer = null;
+		}, OWN_OL_MUTATION_TTL_MS);
+	}
+
+	function markOwnOlNode(node) {
+		if (!node || node.nodeType !== 1) return;
+		try { node.dataset.anitOwnOlMutation = '1'; } catch (_) {}
+	}
+
+	function isOwnOlNode(node) {
+		return !!(
+			node &&
+			node.nodeType === 1 &&
+			(
+				node.dataset?.anitOwnOlMutation === '1' ||
+				node.dataset?.anitNewOlDateGroup === '1' ||
+				node.classList?.contains('bx-messenger-recent-group')
+			)
+		);
+	}
+
+	function clearOwnOlMutationSoon() {
+		if (!ownOlMutationDepth) return;
+		if (suppressOlObserverTimer) clearTimeout(suppressOlObserverTimer);
+		suppressOlObserverTimer = setTimeout(() => {
+			ownOlMutationDepth = 0;
 			suppressOlObserver = false;
 			suppressOlObserverTimer = null;
 		}, 0);
@@ -927,7 +958,7 @@
 					dateGroup.querySelectorAll('.bx-imol-list-recent__item').forEach((item) => {
 						if ((groupStatusByClass || groupStatus) && !item.dataset.anitOlStatus) item.dataset.anitOlStatus = String(groupStatusByClass || groupStatus);
 						const id = getOlChatIdFromElement(item);
-						if (id) map.set(id, currentTs);
+						if (id) map.set(id, Math.max(map.get(id) || 0, currentTs || 0));
 					});
 				});
 			});
@@ -1043,6 +1074,26 @@
 	return tsMap?.get?.(id) || olGroupDateFallback.get(id) || 0;
 }
 
+	function getNewOlItemVisibleDateTs(el) {
+	return parseBitrixDateLabel(el?.querySelector?.('.bx-imol-list-recent-item__content_date')?.textContent || '');
+}
+
+	function uniqueNewOlItems(items) {
+	const byId = new Map();
+	items.forEach((el, index) => {
+		const id = getOlChatIdFromElement(el);
+		if (!id) return;
+		const visibleTs = getNewOlItemVisibleDateTs(el);
+		const prev = byId.get(id);
+		if (!prev || visibleTs > prev.visibleTs || (visibleTs === prev.visibleTs && index < prev.index)) {
+			byId.set(id, { el, index, visibleTs });
+		}
+	});
+	return Array.from(byId.values())
+		.sort((a, b) => a.index - b.index)
+		.map((entry) => entry.el);
+}
+
 	function rebuildNewOlLayout(container, tsMap, reason) {
 	if (!isNewOlLayoutContainer(container)) return false;
 	const groups = Array.from(container.querySelectorAll('.bx-imol-list-recent__group-item_container'));
@@ -1050,8 +1101,9 @@
 
 	olGroupDateFallback = buildOlGroupDateMap(container);
 	const rootGroup = groups[0];
-	const allItems = groups.flatMap((group) => Array.from(group.querySelectorAll('.bx-imol-list-recent__item')));
-	const currentIndex = new Map(allItems.map((el, index) => [el, index]));
+	const rawItems = groups.flatMap((group) => Array.from(group.querySelectorAll('.bx-imol-list-recent__item')));
+	const allItems = uniqueNewOlItems(rawItems);
+	const currentIndex = new Map(rawItems.map((el, index) => [el, index]));
 	allItems.sort((a, b) => {
 		const aId = getOlChatIdFromElement(a);
 		const bId = getOlChatIdFromElement(b);
@@ -1069,6 +1121,17 @@
 		return `${id}@${dateKey(getNewOlItemDateTs(el, tsMap))}`;
 	}).join('|');
 	if (desiredSig === lastOrderSig && hasAnitNewOlDateWrappers(container)) {
+		if (rawItems.length !== allItems.length) {
+			muteOlObserverTick();
+			const keep = new Set(allItems);
+			rawItems.forEach((item) => {
+				if (!keep.has(item)) {
+					markOwnOlNode(item);
+					item.remove();
+				}
+			});
+			clearOwnOlMutationSoon();
+		}
 		updateNewOlGroupVisibility(container);
 		log('rebuild ok.', { total: allItems.length, source: tsMap?.size ? 'rest' : 'dom', reason, layout: 'new-ol', unchanged: true });
 		return true;
@@ -1081,6 +1144,7 @@
 		group.style.display = group === rootGroup ? '' : 'none';
 		Array.from(group.children || []).forEach((node) => {
 			if (node === groupName) return;
+			markOwnOlNode(node);
 			node.remove();
 		});
 	}
@@ -1096,6 +1160,7 @@
 		if (key !== currentKey) {
 			currentWrap = document.createElement('div');
 			currentWrap.dataset.anitNewOlDateGroup = '1';
+			markOwnOlNode(currentWrap);
 			const dateTitle = document.createElement('div');
 			dateTitle.className = 'bx-imol-list-recent__date-group_name';
 			dateTitle.textContent = formatGroupTitleFromTS(ts);
@@ -1110,6 +1175,7 @@
 	rankMap = new Map(newIds.map((id, index) => [id, index]));
 	frozenSetSig = currentSetSignature(newIds);
 	log('rebuild ok.', { total: newIds.length, source: tsMap?.size ? 'rest' : 'dom', reason, layout: 'new-ol' });
+	clearOwnOlMutationSoon();
 	return true;
 }
 
@@ -1119,10 +1185,14 @@
 	if (!container) return;
 	if (isNewOlLayoutContainer(container)) {
 		updateNewOlGroupVisibility(container);
+		clearOwnOlMutationSoon();
 		return;
 	}
 	muteOlObserverTick();
-	container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
+	container.querySelectorAll('.bx-messenger-recent-group').forEach(n => {
+		markOwnOlNode(n);
+		n.remove();
+	});
 	const items = Array.from(container.querySelectorAll('.bx-messenger-cl-item'))
 	.filter(el => el.style.display !== 'none');
 	let lastKey = null;
@@ -1133,6 +1203,7 @@
 	if (key !== lastKey) {
 	const div = document.createElement('div');
 	div.className = 'bx-messenger-recent-group';
+	markOwnOlNode(div);
 	const span = document.createElement('span');
 	span.className = 'bx-messenger-recent-group-title';
 	span.textContent = formatGroupTitleFromTS(ts);
@@ -1141,6 +1212,7 @@
 	lastKey = key;
 }
 }
+	clearOwnOlMutationSoon();
 }
 
 
@@ -1686,7 +1758,11 @@
 		muteOlObserverTick();
 		olGroupDateFallback = buildOlGroupDateMap(container);
 		if (!isNewOlLayoutContainer(container)) {
-			container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
+			container.querySelectorAll('.bx-messenger-recent-group').forEach(n => {
+				markOwnOlNode(n);
+				n.remove();
+			});
+			clearOwnOlMutationSoon();
 		}
 	}
 
@@ -3410,10 +3486,13 @@
 		applyFilters();
 		return;
 	}
-	container.querySelectorAll('.bx-messenger-recent-group').forEach(n => n.remove());
+	container.querySelectorAll('.bx-messenger-recent-group').forEach(n => {
+		markOwnOlNode(n);
+		n.remove();
+	});
 
 	const items = Array.from(container.querySelectorAll('.bx-messenger-cl-item'));
-	if (!items.length) { applyFilters(); return; }
+	if (!items.length) { applyFilters(); clearOwnOlMutationSoon(); return; }
 
 	const ids = items.map(el => getOlChatIdFromElement(el));
 	const setSig = currentSetSignature(ids);
@@ -3426,7 +3505,13 @@
 		if (orderSigNow !== wantedSig) {
 			const mapById = new Map(items.map(el => [getOlChatIdFromElement(el), el]));
 			const frag = document.createDocumentFragment();
-			for (const id of shouldBe) { const el = mapById.get(id); if (el) frag.appendChild(el); }
+			for (const id of shouldBe) {
+				const el = mapById.get(id);
+				if (el) {
+					markOwnOlNode(el);
+					frag.appendChild(el);
+				}
+			}
 			container.appendChild(frag);
 			lastOrderSig = wantedSig;
 			log('reapply frozen order.', { total: items.length, reason });
@@ -3454,7 +3539,10 @@
 	if (newOrderSig !== orderSigNow) {
 		muteOlObserverTick();
 		const frag = document.createDocumentFragment();
-		for (const el of items) frag.appendChild(el);
+		for (const el of items) {
+			markOwnOlNode(el);
+			frag.appendChild(el);
+		}
 			container.appendChild(frag);
 	}
 	lastOrderSig = newOrderSig;
@@ -3465,6 +3553,7 @@
 	log('rebuild ok.', { total: items.length, source: tsMapLocal.size ? 'rest' : 'dom', reason });
 	applyFilters();
 	rebuildDateGroups(tsMapLocal);
+	clearOwnOlMutationSoon();
 	}
 
 	function armObserver() {
@@ -3473,11 +3562,9 @@
 		if (obs) obs.disconnect();
 
 		// Ignore synthetic group headers in OL, otherwise observer reacts to our own rebuilds.
-		const itemSel = IS_OL_FRAME ? OL_ITEM_SELECTOR : '.bx-im-list-recent-item__wrap';
+	const itemSel = IS_OL_FRAME ? OL_ITEM_SELECTOR : '.bx-im-list-recent-item__wrap';
 
 	obs = new MutationObserver((mutations) => {
-		if (IS_OL_FRAME && suppressOlObserver) return;
-
 		const stillInternal = isInternalChatsDOM();
 		if (!IS_OL_FRAME && !stillInternal) {
 		document.getElementById('anit-filters')?.remove();
@@ -3488,10 +3575,14 @@
 	let need = false;
 	for (const m of mutations) {
 		if (m.type === 'childList') {
-		if ([...m.addedNodes, ...m.removedNodes].some(n =>
-			n.nodeType === 1 &&
-			(n.matches?.(itemSel) || n.querySelector?.(itemSel))
-			)) { need = true; break; }
+		if ([...m.addedNodes, ...m.removedNodes].some(n => {
+			if (n.nodeType !== 1) return false;
+			const matchesItem = n.matches?.(itemSel) || n.querySelector?.(itemSel);
+			if (!matchesItem) return false;
+			if (!IS_OL_FRAME) return true;
+			if (!suppressOlObserver) return true;
+			return !isOwnOlNode(n);
+		})) { need = true; break; }
 		}
 	}
 	if (!need) return;
