@@ -38,6 +38,7 @@
       .then(() => injectScript('injected-modules/folder-bridge-layer.js'))
       .then(() => injectScript('injected-modules/folder-domain.js'))
       .then(() => injectScript('injected-modules/folder-assignment-menu.js'))
+      .then(() => injectScript('injected-modules/message-task-context-menu.js'))
       .then(() => injectScript('injected-modules/mapping-bridge.js'))
       .then(() => injectScript('injected.js'))
       .then(() => injectScript('injected-modules/folder-bar-view.js'))
