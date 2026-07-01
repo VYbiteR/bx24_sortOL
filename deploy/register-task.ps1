@@ -12,10 +12,12 @@ $action = New-ScheduledTaskAction `
     -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
 
 $trigger = New-ScheduledTaskTrigger -Daily -At 03:00
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
 
 Register-ScheduledTask `
     -TaskName $taskName `
     -Action $action `
     -Trigger $trigger `
+    -Settings $settings `
     -Description "Проверка обновлений расширения bx24_sortOL" `
     -Force
