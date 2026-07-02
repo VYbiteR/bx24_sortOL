@@ -629,6 +629,7 @@
     const host = ensureManager();
     if (!host) return;
     host.style.display = 'block';
+    bindEvents();
     setFormState(null);
     renderManager();
   }
