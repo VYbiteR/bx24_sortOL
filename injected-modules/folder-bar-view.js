@@ -45,7 +45,7 @@
             #${deps.barId} {
               position: sticky;
               top: 0;
-              z-index: 24;
+              z-index: 1;
               isolation: isolate;
               margin: 0;
               padding: 6px 8px 4px;
