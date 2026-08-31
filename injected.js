@@ -1641,8 +1641,7 @@
 		const isSystemMessage = !hasSelfAuthor && !hasAuthorAvatar;
 		// Только если 1 непрочитанное и оно системное — не показывать в «Непрочитанные»; если >1 — показываем
 		const isSystemUnreadOnly = hasUnread && counterValue === 1 && isSystemMessage;
-	const avatar = el.querySelector('.bx-im-avatar__container') || el;
-	const cl = (avatar?.className || '') + ' ' + (el.querySelector('.bx-im-chat-title__icon')?.className || '');
+	const cl = Array.from(el.querySelectorAll('.bx-im-list-recent-item__avatar_container [class], .bx-im-chat-title__icon'), node => node.getAttribute('class') || '').join(' ');
 	const has = (rx) => rx.test(cl) || rx.test(title) /*|| rx.test(lastText)*/;
 
 	let itemType = 'other';
