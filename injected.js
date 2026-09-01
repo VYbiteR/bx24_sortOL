@@ -1641,7 +1641,8 @@
 		const isSystemMessage = !hasSelfAuthor && !hasAuthorAvatar;
 		// Только если 1 непрочитанное и оно системное — не показывать в «Непрочитанные»; если >1 — показываем
 		const isSystemUnreadOnly = hasUnread && counterValue === 1 && isSystemMessage;
-	const cl = Array.from(el.querySelectorAll('.bx-im-list-recent-item__avatar_container [class], .bx-im-chat-title__icon'), node => node.getAttribute('class') || '').join(' ');
+	const avatar = el.querySelector('.bx-im-list-recent-item__avatar_content')?.firstElementChild;
+	const cl = [avatar, avatar?.firstElementChild, el.querySelector('.bx-im-chat-title__icon')].map(node => node?.getAttribute?.('class') || '').join(' ');
 	const has = (rx) => rx.test(cl) || rx.test(title) /*|| rx.test(lastText)*/;
 
 	let itemType = 'other';
@@ -1847,7 +1848,8 @@
 	const meta = getItemMeta(el);
 	const isHiddenDuplicate = IS_OL_FRAME && isNewOlLayoutContainer(container) && el.dataset?.anitOlDuplicate === '1';
 	if (IS_OL_FRAME && isNewOlLayoutContainer(container)) markOwnOlNode(el);
-	el.style.display = !isHiddenDuplicate && matchByFilters(meta) ? '' : 'none';
+	const display = !isHiddenDuplicate && matchByFilters(meta) ? '' : 'none';
+	if (el.style.display !== display) el.style.display = display;
 }
 	if (!IS_OL_FRAME && !isTasksChatsModeNow() && window.__anitProjectLookup && (filters.sortMode === 'project' || filters.sortMode === 'projectName')) {
 		const visible = items.filter(el => el.style.display !== 'none');

@@ -181,7 +181,7 @@
     if (containerObserver) containerObserver.disconnect();
     observedContainer = container;
     containerObserver = new MutationObserver(() => FolderBarView.scheduleRender());
-    containerObserver.observe(container, { childList: true, subtree: true, attributes: true, characterData: true });
+    containerObserver.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'], characterData: true });
   }
 
   function bindRootObserver() {
