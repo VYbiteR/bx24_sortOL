@@ -816,12 +816,32 @@
 	const normId = (raw) => normalizeDialogId(raw);
 
 	function getOlChatIdFromElement(el) {
-		return normId(
+		const domId = normId(
 			el?.getAttribute?.('data-userid') ||
 			el?.dataset?.userid ||
 			el?.getAttribute?.('contextdialogid') ||
 			el?.querySelector?.('[contextdialogid]')?.getAttribute?.('contextdialogid')
 		);
+		if (domId) return domId;
+		const title = el?.querySelector?.('.bx-im-chat-title__text')?.textContent?.trim();
+		if (!title) return '';
+		if (el.dataset.anitOlResolvedTitle === title && el.dataset.anitOlDialogId) {
+			return el.dataset.anitOlDialogId;
+		}
+		const store = window.BX?.Messenger?.v2?.Application?.Core?.getStore?.();
+		const recent = store?.state?.openLines?.recent?.collection || {};
+		const chats = store?.state?.chats?.collection || {};
+		const matches = Object.values(recent).filter((item) => chats[item.dialogId]?.name === title);
+		const preview = el.querySelector('.bx-imol-list-recent-item__message_text')?.textContent?.trim();
+		const candidates = matches.length > 1 && preview
+			? matches.filter((item) => store?.state?.messages?.collection?.[item.messageId]?.text?.trim() === preview)
+			: matches;
+		const id = candidates.length === 1 ? normId(candidates[0].dialogId) : '';
+		const channel = id ? String(chats[id]?.entityLink?.id || '') : '';
+		if (el.dataset.anitOlResolvedTitle !== title) el.dataset.anitOlResolvedTitle = title;
+		if (el.dataset.anitOlDialogId !== id) el.dataset.anitOlDialogId = id;
+		if (el.dataset.anitOlChannel !== channel) el.dataset.anitOlChannel = channel;
+		return id;
 	}
 
 		function getChatItemElement(target) {
@@ -1177,6 +1197,14 @@
 
 	olGroupDateFallback = buildOlGroupDateMap(container);
 	const rawItems = groups.flatMap((group) => Array.from(group.querySelectorAll('.bx-imol-list-recent__item')));
+	if (rawItems.some((item) => !getOlChatIdFromElement(item))) {
+		rawItems.forEach((item) => {
+			delete item.dataset.anitOlDuplicate;
+			item.style.display = '';
+			item.style.order = '';
+		});
+		return false;
+	}
 	const allItems = uniqueNewOlItems(rawItems);
 	const currentIndex = new Map(rawItems.map((el, index) => [el, index]));
 	allItems.sort((a, b) => {
@@ -1591,9 +1619,9 @@
 		el.querySelector('[contextdialogid]')?.getAttribute('title') ||
 		''
 	).trim()).toLowerCase();
-	const cls = el.className || '';
-	const isWhatsApp = /-wz_whatsapp_/i.test(cls);
-	const isTelegram = /-wz_telegram_/i.test(cls);
+	const source = `${el.className || ''} ${el.dataset.anitOlChannel || ''}`;
+	const isWhatsApp = /wz_whatsapp_/i.test(source);
+	const isTelegram = /wz_telegram_/i.test(source);
 	const hasAttach = /\[(вложение|файл)\]/i.test(lastText);
 	const dateTs = tsMapOnce?.get?.(id) || olGroupDateFallback.get(id) || 0;
 	return enrichMetaWithFolder({ id, status, hasUnread, lastText, title, isWhatsApp, isTelegram, hasAttach, type: 'ol', dateTs });
@@ -1848,7 +1876,7 @@
 	const meta = getItemMeta(el);
 	const isHiddenDuplicate = IS_OL_FRAME && isNewOlLayoutContainer(container) && el.dataset?.anitOlDuplicate === '1';
 	if (IS_OL_FRAME && isNewOlLayoutContainer(container)) markOwnOlNode(el);
-	const display = !isHiddenDuplicate && matchByFilters(meta) ? '' : 'none';
+	const display = !isHiddenDuplicate && ((IS_OL_FRAME && !meta.id) || matchByFilters(meta)) ? '' : 'none';
 	if (el.style.display !== display) el.style.display = display;
 }
 	if (!IS_OL_FRAME && !isTasksChatsModeNow() && window.__anitProjectLookup && (filters.sortMode === 'project' || filters.sortMode === 'projectName')) {

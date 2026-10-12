@@ -39,6 +39,7 @@
       .then(() => injectScript('injected-modules/folder-domain.js'))
       .then(() => injectScript('injected-modules/folder-assignment-menu.js'))
       .then(() => injectScript('injected-modules/message-task-context-menu.js'))
+      .then(() => chrome.runtime.sendMessage({ type: 'ANIT_BXCS_LOAD_MODULES' }).catch(() => {}))
       .then(() => injectScript('injected-modules/mapping-bridge.js'))
       .then(() => injectScript('injected.js'))
       .then(() => injectScript('injected-modules/folder-bar-view.js'))
@@ -361,7 +362,7 @@
   }
 
   function isOlFrameDom() {
-    return !!document.querySelector('.bx-messenger-recent-wrap.bx-messenger-recent-lines-wrap .bx-messenger-cl-item');
+    return !!document.querySelector('.bx-messenger-recent-wrap.bx-messenger-recent-lines-wrap .bx-messenger-cl-item, .bx-imol-list-recent__scroll-container .bx-imol-list-recent__item, .bx-imol-list-container-recent__elements .bx-imol-list-recent__item');
   }
 
   function isTasksChatDom() {
@@ -397,18 +398,18 @@
     }
 
     if (mode === 'ol') {
-      const chats = Array.from(document.querySelectorAll('.bx-messenger-recent-wrap.bx-messenger-recent-lines-wrap .bx-messenger-cl-item')).map((el) => {
-        const id = normalizeChatId(el.getAttribute('data-userid') || el.dataset.userid);
-        const title = normalizeText(el.querySelector('.bx-messenger-cl-user-title')?.textContent);
-        const lastText = normalizeText(el.querySelector('.bx-messenger-cl-user-desc')?.textContent);
-        const status = normalizeText(el.getAttribute('data-status') || el.dataset.status);
-        const className = String(el.className || '');
-        const channel = /-wz_whatsapp_/i.test(className) ? 'whatsapp' : /-wz_telegram_/i.test(className) ? 'telegram' : '';
+      const chats = Array.from(document.querySelectorAll('.bx-messenger-recent-wrap.bx-messenger-recent-lines-wrap .bx-messenger-cl-item, .bx-imol-list-recent__item')).filter((el) => el.dataset.anitOlDuplicate !== '1').map((el) => {
+        const id = normalizeChatId(el.getAttribute('data-userid') || el.dataset.userid || el.dataset.anitOlDialogId);
+        const title = normalizeText(el.querySelector('.bx-messenger-cl-user-title, .bx-im-chat-title__text')?.textContent);
+        const lastText = normalizeText(el.querySelector('.bx-messenger-cl-user-desc, .bx-imol-list-recent-item__message_text')?.textContent);
+        const status = normalizeText(el.getAttribute('data-status') || el.dataset.status || el.dataset.anitOlStatus);
+        const source = `${el.className || ''} ${el.dataset.anitOlChannel || ''}`;
+        const channel = /wz_whatsapp_/i.test(source) ? 'whatsapp' : /wz_telegram_/i.test(source) ? 'telegram' : '';
         return {
           id,
           title,
           lastText,
-          hasUnread: !!el.querySelector('.bx-messenger-cl-count-digit'),
+          hasUnread: !!el.querySelector('.bx-messenger-cl-count-digit, .bx-imol-list-recent-item__counter_number'),
           status,
           channel
         };

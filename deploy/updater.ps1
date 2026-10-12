@@ -145,6 +145,9 @@ try {
     if (!(Test-Path $newManifestPath)) {
         throw "В архиве не найден manifest.json"
     }
+    if (Test-Path (Join-Path $extractPath "modules")) {
+        throw "Публичный архив не должен содержать приватные модули"
+    }
 
     $newManifest = Get-Content $newManifestPath -Raw | ConvertFrom-Json
     $archiveVersion = Normalize-Version $newManifest.version
@@ -156,6 +159,10 @@ try {
     Copy-Item -Path (Join-Path $extensionPath "*") -Destination $backupCurrentPath -Recurse -Force
     Get-ChildItem -Path $extensionPath -Force | Remove-Item -Recurse -Force
     Copy-Item -Path (Join-Path $extractPath "*") -Destination $extensionPath -Recurse -Force
+    $savedModules = Join-Path $backupCurrentPath "modules"
+    if (Test-Path $savedModules) {
+        Copy-Item -Path $savedModules -Destination $extensionPath -Recurse -Force
+    }
 
     Save-State "updated" $localVersion $remoteVersion "Обновление выполнено успешно"
     exit 0

@@ -118,7 +118,53 @@
     return syncQueue;
   }
 
+  async function getModules() {
+    try {
+      const response = await fetch(chrome.runtime.getURL('modules/registry.json'));
+      const modules = response.ok ? await response.json() : [];
+      return Array.isArray(modules) ? modules : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg?.type === 'ANIT_BXCS_LOAD_MODULES') {
+      (async () => {
+        if (sender?.tab?.id == null) return;
+        for (const { name } of await getModules()) {
+          if (!/^[a-z0-9_-]+$/i.test(name)) continue;
+          const target = { tabId: sender.tab.id, frameIds: [sender.frameId] };
+          await chrome.scripting.executeScript({ target, files: [`modules/${name}/content.js`], world: 'ISOLATED' });
+          await chrome.scripting.executeScript({ target, files: [`modules/${name}/page.js`], world: 'MAIN' });
+        }
+      })().then(() => sendResponse?.({ ok: true })).catch((error) => {
+        console.warn(LOGP, 'module load failed', error);
+        sendResponse?.({ ok: false });
+      });
+      return true;
+    }
+    if (msg?.type === 'ANIT_BXCS_MODULE_POST') {
+      (async () => {
+        if (sender?.tab?.id == null) throw new Error('Invalid sender');
+        const module = (await getModules()).find((item) => item.name === msg.module);
+        if (!module || !/^https:\/\/[a-z0-9.-]+\/[^?#]*$/i.test(module.endpoint)) throw new Error('Invalid module endpoint');
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        try {
+          const response = await fetch(module.endpoint, {
+            method: 'POST', credentials: 'omit', signal: controller.signal,
+            headers: { 'Content-Type': 'application/json', 'X-ANIT-Time-Code': String(msg.code || '') },
+            body: JSON.stringify(msg.body)
+          });
+          const data = await response.json().catch(() => null);
+          return { status: response.status, data };
+        } finally {
+          clearTimeout(timeout);
+        }
+      })().then(sendResponse).catch((error) => sendResponse?.({ error: String(error.message || error) }));
+      return true;
+    }
     if (msg?.type === 'ANIT_SYNC_CONTENT_SCRIPTS') {
       chrome.storage.sync.get(['portals'], (res) => {
         syncContentScriptsForPortals(res?.portals || {}).then(() => sendResponse?.({ ok: true }));

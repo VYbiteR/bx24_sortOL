@@ -4,7 +4,7 @@
 
   const LOGP = '[ANIT-CHATSORT/TASK-MENU]';
   const MENU_ID = 'bx-im-message-context-menu';
-  const ACTION_ATTR = 'data-anit-create-task-for-message';
+  const ACTION_ATTR = 'data-anit-task-action';
   const LABEL = '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u0434\u0430\u0447\u0443';
   const MESSAGE_WRAP_SELECTOR = '.bx-im-message-base__wrap, .bx-messenger-content-item';
   const MESSAGE_NODE_SELECTOR = [
@@ -18,6 +18,7 @@
   ].join(',');
 
   let lastMessageTarget = null;
+  const actions = [];
 
   function warn(...args) {
     try { console.warn(LOGP, ...args); } catch (_) {}
@@ -104,6 +105,9 @@
   }
 
   function getStore() {
+    const core = window.BX?.Messenger?.v2?.Application?.Core;
+    const current = core?.getStore?.();
+    if (current) return current;
     const app = window.BX?.Messenger?.v2?.Application?.getInstance?.();
     return app?.getCore?.()?.getStore?.() || app?.store || null;
   }
@@ -198,6 +202,8 @@
 
   function findCurrentDialogId() {
     const candidates = [];
+    candidates.push(document.querySelector('.bx-im-list-recent-item__wrap.--selected[data-id]')?.getAttribute('data-id'));
+    candidates.push(document.querySelector('[data-dialog-id]')?.getAttribute('data-dialog-id'));
     try { candidates.push(new URLSearchParams(location.search || '').get('IM_DIALOG')); } catch (_) {}
     try { candidates.push(new URLSearchParams(location.search || '').get('dialogId')); } catch (_) {}
     try { candidates.push(String(location.hash || '').match(/(?:IM_DIALOG|dialogId|dialog)=([^&/?#]+)/i)?.[1]); } catch (_) {}
@@ -262,19 +268,34 @@
     return { chatId, messageId, target: lastMessageTarget };
   }
 
-  function createMenuItem() {
+  function showError(message) {
+    const content = document.createElement('span');
+    content.textContent = message;
+    const notify = () => window.BX?.UI?.Notification?.Center?.notify({ content, autoHideDelay: 5000 });
+    if (window.BX?.UI?.Notification?.Center) notify();
+    else window.BX?.loadExt?.('ui.notification')?.then(notify).catch(warn);
+  }
+
+  function openTaskFromMessage(chatId, messageId) {
+    const EntityCreator = window.BX?.Messenger?.v2?.Lib?.EntityCreator;
+    if (typeof EntityCreator !== 'function') throw new Error('Форма задачи Bitrix24 недоступна');
+    if (!messageId) throw new Error('Не удалось определить сообщение');
+    return new EntityCreator(chatId).createTaskForMessage(messageId);
+  }
+
+  function createMenuItem(action) {
     const item = document.createElement('div');
     item.className = 'ui-popup-menu-item';
-    item.setAttribute(ACTION_ATTR, '1');
+    item.setAttribute(ACTION_ATTR, action.id);
 
     const button = document.createElement('button');
     button.className = 'ui-popup-menu-item-action';
     button.type = 'button';
-    button.title = LABEL;
+    button.title = action.label;
     button.innerHTML = [
       '<div class="ui-popup-menu-item-header">',
       '<div class="ui-popup-menu-item-title">',
-      `<div class="ui-popup-menu-item-title-text">${LABEL}</div>`,
+      `<div class="ui-popup-menu-item-title-text"></div>`,
       '</div>',
       '</div>',
       '<div class="ui-popup-menu-item-buttons">',
@@ -283,28 +304,16 @@
       '</div>',
       '</div>'
     ].join('');
+    button.querySelector('.ui-popup-menu-item-title-text').textContent = action.label;
 
-    button.addEventListener('click', (event) => {
+    button.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();
-
-      const EntityCreator = window.BX?.Messenger?.v2?.Lib?.EntityCreator;
-      if (typeof EntityCreator !== 'function') {
-        warn('BX.Messenger.v2.Lib.EntityCreator is unavailable');
-        return;
-      }
-
-      const { chatId, messageId, target } = resolvePayload();
-      if (!messageId) {
-        warn('Cannot resolve messageId', { chatId, messageId, target });
-        return;
-      }
-
       try {
-        const creator = new EntityCreator(chatId);
-        creator.createTaskForMessage(messageId);
+        await action.run(resolvePayload());
       } catch (error) {
-        warn('createTaskForMessage failed', error);
+        warn(action.id, error);
+        showError(String(error?.message || 'Не удалось открыть задачу'));
       }
     }, true);
 
@@ -313,10 +322,21 @@
   }
 
   function enhanceMenu(menu) {
-    if (!menu || menu.querySelector(`[${ACTION_ATTR}="1"]`)) return;
+    if (!menu) return;
     const items = menu.querySelector('.ui-popup-menu-items');
     if (!items) return;
-    items.appendChild(createMenuItem());
+    actions.forEach((action) => {
+      if (!items.querySelector(`[${ACTION_ATTR}="${action.id}"]`)) items.appendChild(createMenuItem(action));
+    });
+  }
+
+  function registerMessageAction(action) {
+    if (!/^[a-z0-9_-]+$/i.test(action?.id) || !action?.label || typeof action?.run !== 'function') {
+      throw new Error('Invalid message action');
+    }
+    if (actions.some((item) => item.id === action.id)) throw new Error('Duplicate message action');
+    actions.push(action);
+    scanMenus(document);
   }
 
   function scanMenus(root) {
@@ -349,6 +369,13 @@
     if (target) rememberTarget(target);
     return resolvePayload();
   };
+
+  window.__ANIT_BXCS_TASK_MENU__ = Object.freeze({
+    registerMessageAction,
+    openTaskFromMessage,
+    showError
+  });
+  registerMessageAction({ id: 'create-task', label: LABEL, run: ({ chatId, messageId }) => openTaskFromMessage(chatId, messageId) });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', arm, { once: true });
