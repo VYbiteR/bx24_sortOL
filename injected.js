@@ -99,7 +99,7 @@
 	}
 
 	function isInternalRecentDOM() {
-		return !!document.querySelector('.bx-im-list-container-recent__elements .bx-im-list-recent-item__wrap');
+		return !!document.querySelector('.bx-im-list-container-recent__elements .bx-im-list-recent-item__wrap, .bx-im-list-container-folder-all__elements .bx-im-list-recent-item__wrap');
 	}
 
 	function isInternalTaskDOM() {
@@ -153,7 +153,7 @@
 
 		const taskList = document.querySelector('.bx-im-list-container-task__elements');
 		if (taskList) return taskList;
-		return document.querySelector('.bx-im-list-container-recent__elements');
+		return document.querySelector('.bx-im-list-container-recent__elements, .bx-im-list-container-folder-all__elements');
 	}
 
 
@@ -373,9 +373,7 @@
 
 
 		function findInternalScrollContainer() {
-			const list =
-				document.querySelector('.bx-im-list-container-task__elements') ||
-				document.querySelector('.bx-im-list-container-recent__elements');
+			const list = findContainerInternal();
 			if (!list) return null;
 
 
@@ -387,6 +385,7 @@
 
 
 			const direct =
+				list.querySelector('.bx-im-list-base__scroll-container') ||
 				document.querySelector('.bx-im-list-task__scroll-container') ||
 				document.querySelector('.bx-im-list-recent__scroll-container');
 			if (direct) return direct;
@@ -421,7 +420,7 @@
 					scrollEl = await waitForEl(findInternalScrollContainer, {timeout: 10000, interval: 100});
 				}
 				if (!observeEl) {
-					observeEl = await waitForEl('.bx-im-list-container-recent__elements', {timeout: 10000, interval: 100});
+					observeEl = await waitForEl(findContainerInternal, {timeout: 10000, interval: 100});
 				}
 				if (!scrollEl) { console.warn('[ANIT-CHATSORTER] autoScroll: не найден scroll container'); return resolve(); }
 				if (!observeEl) observeEl = scrollEl;
@@ -503,6 +502,22 @@
 		}
 
 		async function prefetchInternalRecentViaBx({ maxTime = 60000, maxPages = 500, monthsLimit = 0, onProgress } = {}) {
+			if (document.querySelector('.bx-im-list-container-folder-all__elements')) {
+				const scroll = findInternalScrollContainer();
+				if (!scroll) throw new Error('All folder scroll container unavailable');
+				const before = countInternalRecentItems();
+				const started = performance.now();
+				// Native scrolling keeps the folder service cursor and rendered collection in sync.
+				scroll.scrollTop = scroll.scrollHeight;
+				scroll.dispatchEvent(new Event('scroll'));
+				while (countInternalRecentItems() === before && performance.now() - started < Math.min(maxTime, 10000)) {
+					await sleep(100);
+				}
+				const after = countInternalRecentItems();
+				const totalAdded = Math.max(0, after - before);
+				if (typeof onProgress === 'function') onProgress({ added: totalAdded, totalAdded, page: 1, before, after });
+				return { totalAdded };
+			}
 			const BXNS = window.BX;
 			const recent = BXNS?.Messenger?.v2?.Service?.LegacyRecentService?.getInstance?.();
 			if (!recent?.loadNextPage) {
@@ -1628,7 +1643,8 @@
 }
 
 	function getItemMetaInternal(el) {
-	const id = normId(el.getAttribute('data-id') || el.dataset.id || el.querySelector('[data-id]')?.getAttribute('data-id'));
+	const dialogId = el.getAttribute('data-id') || el.dataset.id || el.querySelector('[data-id]')?.getAttribute('data-id');
+	const id = normId(dialogId);
 		const title = normalizeTextMaybeUtf8Mojibake((
 			el.querySelector('.bx-im-chat-title__text')?.getAttribute('title') ||
 			el.querySelector('.bx-im-chat-title__text')?.textContent || ''
@@ -1670,7 +1686,7 @@
 		// Только если 1 непрочитанное и оно системное — не показывать в «Непрочитанные»; если >1 — показываем
 		const isSystemUnreadOnly = hasUnread && counterValue === 1 && isSystemMessage;
 	const avatar = el.querySelector('.bx-im-list-recent-item__avatar_content')?.firstElementChild;
-	const cl = [avatar, avatar?.firstElementChild, el.querySelector('.bx-im-chat-title__icon')].map(node => node?.getAttribute?.('class') || '').join(' ');
+	const cl = [avatar, avatar?.firstElementChild, ...Array.from(avatar?.querySelectorAll?.('[class]') || []), el.querySelector('.bx-im-chat-title__icon')].map(node => node?.getAttribute?.('class') || '').join(' ');
 	const has = (rx) => rx.test(cl) || rx.test(title) /*|| rx.test(lastText)*/;
 
 	let itemType = 'other';
@@ -1685,7 +1701,18 @@
 	if (has(/--tasks\b/)) itemType = 'tasks';
 	if (has(/--call\b/)) itemType = 'phone';
 	if (has(/--calendar\b/)) itemType = 'calendar';
-	if (has(/--extranet|--guest/)) itemType = 'guests';
+	if (itemType !== 'group' && has(/--extranet|--guest/)) itemType = 'guests';
+	const chat = window.BX?.Messenger?.v2?.Application?.Core?.getStore?.()?.state?.chats?.collection?.[dialogId];
+	const modelType = {
+		user: 'dialog', chat: 'chat', open: 'chat', crm: 'deal', videoconf: 'videoconf',
+		support24Question: 'support', support24Notifier: 'support', sonetGroup: 'group', collab: 'group',
+		general: 'general', generalChannel: 'general', tasks: 'tasks', tasksTask: 'tasks', call: 'phone', calendar: 'calendar'
+	}[chat?.type];
+	if (modelType) itemType = modelType;
+	if (chat?.type === 'user') {
+		if (chat.extranet) itemType = 'guests';
+		if (has(/--network\b/)) itemType = 'network';
+	}
 
 	const hasAttach = /\[(вложение|файл)\]/i.test(lastText);
 
@@ -2088,8 +2115,8 @@
 	(host.querySelector('.header') || host).addEventListener('dblclick', () => {
 	const listCol = IS_OL_FRAME
 	? findContainerOL()
-	: document.querySelector('.bx-im-list-container-recent__elements')?.closest('.bx-im-list-container-recent__container')
-	|| document.querySelector('.bx-im-list-container-recent__elements');
+	: findContainerInternal()?.closest('.bx-im-list-container-recent__container, .bx-im-list-container-folder-all__container, .bx-im-list-container-task__container')
+	|| findContainerInternal();
 
 	const vr = document.documentElement.getBoundingClientRect();
 	const rr = listCol?.getBoundingClientRect();
@@ -3315,8 +3342,8 @@
 
 	const listCol = IS_OL_FRAME
 	? findContainerOL()
-	: document.querySelector('.bx-im-list-container-recent__elements')?.closest('.bx-im-list-container-recent__container')
-	|| document.querySelector('.bx-im-list-container-recent__elements');
+	: findContainerInternal()?.closest('.bx-im-list-container-recent__container, .bx-im-list-container-folder-all__container, .bx-im-list-container-task__container')
+	|| findContainerInternal();
 
 	if (!restorePosition(host, mode)) {
 	const vr = document.documentElement.getBoundingClientRect();

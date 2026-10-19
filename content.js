@@ -375,6 +375,7 @@
   function isInternalChatDom() {
     return !!(
       document.querySelector('.bx-im-list-container-recent__elements .bx-im-list-recent-item__wrap')
+      || document.querySelector('.bx-im-list-container-folder-all__elements .bx-im-list-recent-item__wrap')
       || document.querySelector('.bx-im-list-container-task__elements .bx-im-list-recent-item__wrap')
       || document.querySelector('.bx-im-list-recent__scroll-container .bx-im-list-recent-item__wrap')
     );
@@ -626,6 +627,7 @@
   function hasChatsContainer() {
     return !!(
       document.querySelector('.bx-im-list-container-task__elements')
+      || document.querySelector('.bx-im-list-container-folder-all__elements')
       || document.querySelector('.bx-im-list-container-recent__elements')
       || document.querySelector('.bx-im-list-task__scroll-container')
       || document.querySelector('.bx-im-list-recent__scroll-container')
