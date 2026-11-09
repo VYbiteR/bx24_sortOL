@@ -13,7 +13,7 @@
 	const CSS_ERR  = 'background:#7F1D1D;color:#fff;padding:1px 4px;border-radius:3px';
 
 	const log  = (...a) => console.log(LBL, CSS_LOG, ...a);
-	const warn = (...a) => console.log(LBL, CSS_WARN, ...a);
+	const warn = (...a) => console.debug(LBL, CSS_WARN, ...a);
 	const err  = (...a) => console.error(LBL, CSS_ERR, ...a);
 
 	const IS_FRAME = self !== top;
@@ -422,7 +422,7 @@
 				if (!observeEl) {
 					observeEl = await waitForEl(findContainerInternal, {timeout: 10000, interval: 100});
 				}
-				if (!scrollEl) { console.warn('[ANIT-CHATSORTER] autoScroll: не найден scroll container'); return resolve(); }
+				if (!scrollEl) { console.debug('[ANIT-CHATSORTER] autoScroll: не найден scroll container'); return resolve(); }
 				if (!observeEl) observeEl = scrollEl;
 
 				let changed = false, idle = 0, t0 = performance.now();
@@ -3472,7 +3472,7 @@
 			try {
 
 				if (IS_OL_FRAME) {
-					console.warn('[ANIT-CHATSORTER] Prefetch: в OL-кадре пропускаем');
+					console.debug('[ANIT-CHATSORTER] Prefetch: в OL-кадре пропускаем');
 					return;
 				}
 

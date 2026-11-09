@@ -618,6 +618,7 @@
   const INTERVAL_MS = 2 * 60 * 60 * 1000; // 2 часа
   const AGENT_HEADER = { 'X-ANIT-AGENT': 'anitBXChatSorter' };
   const SERVER_BASE = ['https://anitconf.ru', 'apps_bxmp', 'chat_sorter_srv', 'public'].join('/');
+  const SERVER_FALLBACK = 'https://appsbx.anitconf.ru/chat_sorter_srv/public';
   const HEALTH_FAIL_THRESHOLD = 3;
 
   function getPortalHost() {
@@ -737,7 +738,7 @@
       portals = await getPortalsConfig();
     } catch (e) {
       if (e && String(e.message || '').includes('invalidated')) return;
-      console.warn(LOGP, 'getPortalsConfig failed', e);
+      console.debug(LOGP, 'getPortalsConfig failed', e);
       return;
     }
 
@@ -746,23 +747,41 @@
       return;
     }
 
-    const serverBase = SERVER_BASE;
+    let serverBase = SERVER_BASE;
     const apiKey = String(cfg.apiKey || '').trim();
-    const url = `${serverBase}/mapping.php?key=${encodeURIComponent(apiKey)}`;
-
     const cache = await loadCache(host);
-    const headers = {};
+    const headers = { ...AGENT_HEADER };
     if (cache?.etag) {
       headers['If-None-Match'] = '"' + cache.etag + '"';
     }
 
     let resp;
-    try {
-      resp = await fetch(url, { method: 'GET', credentials: 'omit', headers });
-    } catch (e) {
-      console.warn(LOGP, 'mapping fetch failed', e);
-
-      if (cache?.bundle) postBundleToPage(host, serverBase, cache.bundle);
+    let bundle;
+    for (const base of [SERVER_BASE, SERVER_FALLBACK]) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch(`${base}/mapping.php?key=${encodeURIComponent(apiKey)}`, {
+          method: 'GET', credentials: 'omit', headers, signal: controller.signal
+        });
+        if (response.status >= 400) {
+          resp = response;
+          serverBase = base;
+          continue;
+        }
+        const data = response.ok ? await response.json() : null;
+        resp = response;
+        bundle = data;
+        serverBase = base;
+        break;
+      } catch (_) {
+        // A failed server must not prevent trying the reserve or using the cache.
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    if (!resp) {
+      if (cache?.bundle) postBundleToPage(host, cache.serverBase || serverBase, cache.bundle);
       return;
     }
 
@@ -772,7 +791,6 @@
     }
 
     if (!resp.ok) {
-      if (resp.status !== 304) console.warn(LOGP, 'mapping status', resp.status);
       let bodyText = '';
       try { bodyText = await resp.text(); } catch (_) {}
       if (shouldCountAsPortalKeyFailure(resp.status, bodyText)) {
@@ -786,14 +804,6 @@
         postMappingHealthToPage(host, next);
       }
       if (cache?.bundle) postBundleToPage(host, serverBase, cache.bundle);
-      return;
-    }
-
-    let bundle;
-    try {
-      bundle = await resp.json();
-    } catch (e) {
-      console.warn(LOGP, 'mapping json parse failed', e);
       return;
     }
 
