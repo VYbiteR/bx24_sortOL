@@ -1346,6 +1346,7 @@
 	onlyTelegram: false,
 	typesSelected: [],
 	hideCompletedTasks: false,
+	hiddenTaskStatuses: [],
 	hideSystemMessages: false,
 	projectIndexes: [],
 	responsibleIndexes: [],
@@ -1642,6 +1643,34 @@
 	return enrichMetaWithFolder({ id, status, hasUnread, lastText, title, isWhatsApp, isTelegram, hasAttach, type: 'ol', dateTs });
 }
 
+	const TASK_CHAT_STATUSES = [
+		['', 'Без статуса'],
+		['default.png', 'В работе'],
+		['deferred.png', 'Отложенная'],
+		['completed.png', 'Завершённая'],
+		['expired.png', 'Просроченная']
+	];
+	const TASK_AVATAR_SELECTOR = '.bx-im-list-recent-item__avatar_content';
+
+	function getTaskStatusIndex(el) {
+		const image = el.querySelector(`${TASK_AVATAR_SELECTOR} image, ${TASK_AVATAR_SELECTOR} img`);
+		const src = image?.getAttribute('href') || image?.getAttribute('xlink:href') || image?.getAttribute('src') || '';
+		const filename = src.split(/[?#]/)[0].split('/').pop();
+		return Math.max(0, TASK_CHAT_STATUSES.findIndex(([file]) => file === filename));
+	}
+
+	function isTaskAvatarMutation(mutation) {
+		const target = mutation.target;
+		if (!target?.closest?.('.bx-im-list-recent-item__wrap')) return false;
+		if (mutation.type === 'attributes') {
+			return ['href', 'xlink:href', 'src'].includes(mutation.attributeName) && !!target.closest(TASK_AVATAR_SELECTOR);
+		}
+		if (mutation.type !== 'childList') return false;
+		return !!target.closest(TASK_AVATAR_SELECTOR) || [...mutation.addedNodes, ...mutation.removedNodes].some(node =>
+			node.matches?.(TASK_AVATAR_SELECTOR) || node.querySelector?.(TASK_AVATAR_SELECTOR)
+		);
+	}
+
 	function getItemMetaInternal(el) {
 	const dialogId = el.getAttribute('data-id') || el.dataset.id || el.querySelector('[data-id]')?.getAttribute('data-id');
 	const id = normId(dialogId);
@@ -1760,22 +1789,9 @@
 		}
 	}
 
-	// status mapping only in "task chats" mode (если расширение поддерживает статусы)
-	if (isTasksChatsModeNow() && window.__anitProjectLookup?.chatToStatus) {
-		const chatId = extractChatIdNumber(el);
-		if (chatId !== null) {
-			const chatToStatus = window.__anitProjectLookup.chatToStatus;
-			const map = chatToStatus instanceof Map ? chatToStatus : new Map(chatToStatus || []);
-			const sIdx = map.get(chatId);
-			if (sIdx !== undefined) {
-				const st = (window.__anitProjectLookup.statuses || [])[sIdx];
-				meta.statusIndex = sIdx;
-				meta.statusName = (st && st[1]) ? normalizeTextMaybeUtf8Mojibake(st[1]) : 'Без статуса';
-			} else {
-				meta.statusIndex = 0;
-				meta.statusName = 'Без статуса';
-			}
-		}
+	if (isTasksChatsModeNow()) {
+		meta.statusIndex = getTaskStatusIndex(el);
+		meta.statusName = TASK_CHAT_STATUSES[meta.statusIndex][1];
 	}
 
 	return enrichMetaWithFolder(meta);
@@ -1797,7 +1813,8 @@
 		);
 	}
 
-	function isTaskCompletedByLastMessage(meta) {
+	function isTaskCompleted(meta) {
+		if (meta?.statusIndex > 0) return TASK_CHAT_STATUSES[meta.statusIndex]?.[0] === 'completed.png';
 		const t = (meta?.lastText || '').toLowerCase();
 		return t.includes('завершил задачу') || t.includes('принял задачу');
 	}
@@ -1809,8 +1826,10 @@
 		if (filters.hideSystemMessages && meta.isSystemMessage) return false; // скрыть все без стрелочки или аватарки
 	}
 	if (filters.withAttach && !meta.hasAttach) return false;
+	if (!IS_OL_FRAME && isTasksChatsModeNow() && Array.isArray(filters.hiddenTaskStatuses) &&
+		filters.hiddenTaskStatuses.includes(TASK_CHAT_STATUSES[meta.statusIndex]?.[0])) return false;
 	if (!IS_OL_FRAME && filters.hideCompletedTasks && isTasksChatsModeNow()) {
-		if (isTaskCompletedByLastMessage(meta)) return false;
+		if (isTaskCompleted(meta)) return false;
 	}
 	if (IS_OL_FRAME) {
 	if (filters.onlyWhatsApp && !meta.isWhatsApp) return false;
@@ -1861,8 +1880,8 @@
 			if (!rSel.includes(ri)) return false;
 		}
 	}
-	// status filter only in "task chats" mode (если расширение поддерживает статусы)
-	if (!IS_OL_FRAME && isTasksChatsModeNow() && window.__anitProjectLookup?.statuses) {
+	// Статусы чатов задач определяются по текущей аватарке.
+	if (!IS_OL_FRAME && isTasksChatsModeNow()) {
 		const sSel = Array.isArray(filters.statusIndexes) ? filters.statusIndexes : [];
 		if (sSel.length) {
 			const si = (typeof meta.statusIndex === 'number') ? meta.statusIndex : 0;
@@ -1979,6 +1998,9 @@
 			syncFlatpickrInputValue(host.querySelector('#anit_date_to'), filters.dateTo);
 			const hc = host.querySelector('#anit_hide_completed');
 			if (hc) hc.checked = !!filters.hideCompletedTasks;
+    host.querySelectorAll('[data-hide-task-status]').forEach(cb => {
+      cb.checked = Array.isArray(filters.hiddenTaskStatuses) && filters.hiddenTaskStatuses.includes(cb.dataset.hideTaskStatus);
+    });
 			const hs = host.querySelector('#anit_hide_system');
 			if (hs) hs.checked = !!filters.hideSystemMessages;
 			if (IS_OL_FRAME) {
@@ -2013,6 +2035,7 @@
 			filters.dateFrom   = String(host.querySelector('#anit_date_from')?.value || '').trim();
 			filters.dateTo     = String(host.querySelector('#anit_date_to')?.value || '').trim();
 			filters.hideCompletedTasks = host.querySelector('#anit_hide_completed')?.checked || false;
+    filters.hiddenTaskStatuses = Array.from(host.querySelectorAll('[data-hide-task-status]:checked'), cb => cb.dataset.hideTaskStatus);
 			filters.hideSystemMessages = isTasksChatsModeNow() ? (host.querySelector('#anit_hide_system')?.checked || false) : false;
 			if (IS_OL_FRAME) {
 				filters.onlyWhatsApp = host.querySelector('#anit_wa')?.checked || false;
@@ -2388,6 +2411,9 @@
     <label><input type="checkbox" id="anit_attach"> С вложениями</label>
 	${isTasksMode ? `
 	  <label><input type="checkbox" id="anit_hide_completed"> Скрыть завершённые</label>
+      <label><input type="checkbox" data-hide-task-status="default.png"> Скрыть в работе</label>
+      <label><input type="checkbox" data-hide-task-status="deferred.png"> Скрыть отложенные</label>
+      <label><input type="checkbox" data-hide-task-status="expired.png"> Скрыть просроченные</label>
 	  <label><input type="checkbox" id="anit_hide_system"> Скрыть системные</label>
 	` : ``}
     </div>
@@ -3048,19 +3074,11 @@
 		}
 
 		function getStatusesSafe() {
-			const s = window.__anitProjectLookup?.statuses;
-			return Array.isArray(s) ? s : null;
+			return TASK_CHAT_STATUSES;
 		}
 
 		function getUsedStatusIndexes() {
-			const chatToStatus = window.__anitProjectLookup?.chatToStatus;
-			const map = chatToStatus instanceof Map ? chatToStatus : new Map(chatToStatus || []);
-			const used = new Set();
-			for (const idx of map.values()) {
-				const n = Number(idx);
-				if (Number.isFinite(n) && n >= 0) used.add(n);
-			}
-			return used;
+			return new Set(Array.from(findContainer()?.querySelectorAll('.bx-im-list-recent-item__wrap') || [], getTaskStatusIndex));
 		}
 
 		function getSelectedStatusIndexes() {
@@ -3109,8 +3127,7 @@
 			if (statuses) {
 				for (let i = 0; i < statuses.length; i++) {
 					const st = statuses[i];
-					const sid = (st && st[0]) ? Number(st[0]) : 0;
-					if (sid === 0) { noIdx = i; break; }
+					if (!st[0]) { noIdx = i; break; }
 				}
 				if (noIdx >= 0 && usedIndexes.has(noIdx)) hasNoStatus = true;
 			}
@@ -3124,10 +3141,9 @@
 				for (let i = 0; i < statuses.length; i++) {
 					if (!usedIndexes.has(i)) continue;
 					const st = statuses[i];
-					const sid = (st && st[0]) ? Number(st[0]) : 0;
 					const label = (st && st[1]) ? String(st[1]) : '';
 					if (!label) continue;
-					if (sid === 0) continue;
+					if (!st[0]) continue;
 					if (q && !label.toLowerCase().includes(q)) continue;
 					items.push({ idx: i, label });
 				}
@@ -3256,11 +3272,6 @@
 				row.style.display = 'none';
 				return;
 			}
-			const hasStatuses = Array.isArray(window.__anitProjectLookup?.statuses) && window.__anitProjectLookup.statuses.length > 0;
-			if (!hasStatuses) {
-				row.style.display = 'none';
-				return;
-			}
 			if (Array.isArray(filters.statusIndexes) && filters.statusIndexes.length) {
 				filters.statusIndexes = [];
 				saveFilters();
@@ -3366,6 +3377,9 @@
 	syncFlatpickrInputValue(host.querySelector('#anit_date_to'), filters.dateTo);
 	const hc = host.querySelector('#anit_hide_completed');
 	if (hc) hc.checked = !!filters.hideCompletedTasks;
+    host.querySelectorAll('[data-hide-task-status]').forEach(cb => {
+      cb.checked = Array.isArray(filters.hiddenTaskStatuses) && filters.hiddenTaskStatuses.includes(cb.dataset.hideTaskStatus);
+    });
 	const hs = host.querySelector('#anit_hide_system');
 	if (hs) hs.checked = !!filters.hideSystemMessages;
 
@@ -3388,6 +3402,7 @@
 	filters.dateFrom   = String(host.querySelector('#anit_date_from')?.value || '').trim();
 	filters.dateTo     = String(host.querySelector('#anit_date_to')?.value || '').trim();
 	filters.hideCompletedTasks = host.querySelector('#anit_hide_completed')?.checked || false;
+    filters.hiddenTaskStatuses = Array.from(host.querySelectorAll('[data-hide-task-status]:checked'), cb => cb.dataset.hideTaskStatus);
 	filters.hideSystemMessages = isTasksChatsModeNow() ? (host.querySelector('#anit_hide_system')?.checked || false) : false;
 
 	if (IS_OL_FRAME) {
@@ -3445,6 +3460,7 @@
 	host.querySelector('#anit_attach').checked = false;
 	const hc = host.querySelector('#anit_hide_completed');
 	if (hc) hc.checked = false;
+	host.querySelectorAll('[data-hide-task-status]').forEach(cb => cb.checked = false);
 	const hs = host.querySelector('#anit_hide_system');
 	if (hs) hs.checked = false;
 	host.querySelector('#anit_query').value = '';
@@ -3706,6 +3722,7 @@
 
 	let need = false;
 	for (const m of mutations) {
+		if (!IS_OL_FRAME && isTaskAvatarMutation(m)) { need = true; break; }
 		if (m.type === 'childList') {
 		if ([...m.addedNodes, ...m.removedNodes].some(n => {
 			if (n.nodeType !== 1) return false;
@@ -3742,7 +3759,7 @@
 		container,
 		IS_OL_FRAME
 			? { childList: true, subtree: true, attributes: true, characterData: true }
-			: { childList: true, subtree: true }
+			: { childList: true, subtree: true, attributes: true }
 	);
 	log('observeContainer: подписан на DOM изменения');
 }
